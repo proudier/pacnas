@@ -4,7 +4,7 @@
 
 *What it is*
 
-Pacnas is a recursive caching DNS server. Its peculiarity is that it does not drop a RR (Resource Record) when the TTL (Time To Live) is reached. Instead, it performs a new request to check the validity and -if necessary- update the cache. The extra brandwidth consumption.
+Pacnas is a recursive caching DNS server. Its peculiarity is that it does not drop a RR (Resource Record) when the TTL (Time To Live) is reached. Instead, it performs a new request to check the validity and -if necessary- update the cache.  
 
 *What it is not*
 
