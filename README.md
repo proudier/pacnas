@@ -24,7 +24,7 @@ Using Maven:
 mvn package
 ```
 
-## how to Run 
+## How to Run 
 
 Once built:
 
