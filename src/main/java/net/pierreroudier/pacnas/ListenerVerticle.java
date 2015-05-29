@@ -79,11 +79,13 @@ public class ListenerVerticle extends Verticle {
 		ProcessingContext s = new ProcessingContext();
 
 		try {
+			// Interpret input data
 			s.requestSender = packet.sender();
 			s.queryMessage = new Message(packet.data().getBytes());
 			s.queryRecord = s.queryMessage.getQuestion();
 			logger.info("Request is: \"" + s.queryRecord.toString() + "\"");
 
+			// Basic error check
 			if (s.queryMessage.getHeader().getFlag(Flags.QR) || s.queryMessage.getHeader().getRcode() != Rcode.NOERROR) {
 				logger.info("Request has format error");
 				s.returnCode = Rcode.FORMERR;
@@ -95,6 +97,7 @@ public class ListenerVerticle extends Verticle {
 				generateResponse(s);
 			}
 
+			// Query cache
 			s.answerRS = store.getRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
 					s.queryRecord.getDClass());
 			if (s.answerRS != null) {
@@ -104,18 +107,16 @@ public class ListenerVerticle extends Verticle {
 				generateResponse(s);
 			} else {
 				logger.info("Starting recursive resolution..");
+				s.saveAnswersToStore = true;
 
 				s.recursionCtx = new RecursionContext();
-				s.recursionCtx.currentNS = RecursionContext.ROOT_NS;
 				s.recursionCtx.socket = vertx.createDatagramSocket(InternetProtocolFamily.IPv4);
-
+				s.recursionCtx.currentNS = RecursionContext.ROOT_NS;
 				Record queryRecord = Record.newRecord(s.queryRecord.getName(), s.queryRecord.getType(),
 						s.queryRecord.getDClass());
 				s.recursionCtx.queryMessage = Message.newQuery(queryRecord);
 				s.recursionCtx.queryMessage.getHeader().unsetFlag(Flags.RD);
 
-				s.saveAnswersToStore = true;
-				
 				foobar(s);
 
 				s.recursionCtx.socket.dataHandler(new Handler<DatagramPacket>() {
@@ -155,10 +156,10 @@ public class ListenerVerticle extends Verticle {
 									if (response.getSectionArray(Section.ANSWER).length == 0
 											&& response.getSectionArray(Section.AUTHORITY).length > 0) {
 										logger.info("Response is a redirection to referral");
-										
-										String server = response
-												.getSectionArray(Section.AUTHORITY)[0].getAdditionalName().toString();
-										logger.info(server);
+
+										String server = response.getSectionArray(Section.AUTHORITY)[0]
+												.getAdditionalName().toString();
+										logger.info("Now using " + server);
 
 										s.recursionCtx.currentNS = Address.getByName(server);
 										foobar(s);
@@ -190,7 +191,7 @@ public class ListenerVerticle extends Verticle {
 									}
 								}
 								break;
-								
+
 							default:
 								throw new Exception("Pacnas does not know what to do (yet) out of this return code: "
 										+ Rcode.string(response.getRcode()));
@@ -214,21 +215,10 @@ public class ListenerVerticle extends Verticle {
 		if (s.responseReady) {
 			sendResponse(s);
 		} else {
-			if (s.answerRS == null) {
-
-			} else {
-				logger.error("Unhandled internal error, this request was not answered.");
-			}
+			logger.error("Unhandled internal error, this request was not answered.");
 
 		}
 	}
-
-	// public void onRecursionCompleted(ProcessingContext s) {
-	// s.saveAnswersToStore = true;
-	// s.returnCode = Rcode.NOERROR;
-	// generateResponse(s);
-	// sendResponse(s);
-	// }
 
 	private void generateResponse(ProcessingContext s) {
 		logger.info("Preparing response..");
