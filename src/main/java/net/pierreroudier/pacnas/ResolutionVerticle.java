@@ -20,19 +20,20 @@ import org.xbill.DNS.Rcode;
 import org.xbill.DNS.Record;
 import org.xbill.DNS.Section;
 
-public class ListenerVerticle extends Verticle {
-
+public class ResolutionVerticle extends Verticle {
+	public static String BUS_ADDRESS = "r";
 	private static int MAX_RECURSION_ALLOWED = 10;
 
 	private Logger logger;
-	private DatagramSocket socket;
 	private AsyncResultHandler<DatagramSocket> onSentToRemoteServer;
+	private Handler<org.vertx.java.core.eventbus.Message<byte[]>> myHandler;
+
 	private final StatsManager statsManager = new StatsManager();
 	private final Store store = new InMemoryJavaHashmapStore();
 
 	public void start() {
 		logger = container.logger();
-		logger.info("Starting Listener..");
+		logger.info("Starting ResolutionVerticle..");
 
 		onSentToRemoteServer = new AsyncResultHandler<DatagramSocket>() {
 			public void handle(AsyncResult<DatagramSocket> asyncResult) {
@@ -43,45 +44,29 @@ public class ListenerVerticle extends Verticle {
 			}
 		};
 
-		String addr = "0.0.0.0";
-		int port = 5353;
-		socket = vertx.createDatagramSocket(InternetProtocolFamily.IPv4);
-		socket.setReuseAddress(true);
-		socket.listen(addr, port, new AsyncResultHandler<DatagramSocket>() {
-			public void handle(AsyncResult<DatagramSocket> asyncResult) {
-				if (asyncResult.succeeded()) {
-					socket.dataHandler(new Handler<DatagramPacket>() {
-						public void handle(DatagramPacket packet) {
-							onIncomingDataPacket(packet);
-						}
-					});
-					logger.info("Pacnas is waiting for requests");
-				} else {
-					logger.error("Listen failed", asyncResult.cause());
-					if (socket != null)
-						socket.close();
-					container.exit();
-				}
+		myHandler = new Handler<org.vertx.java.core.eventbus.Message<byte[]>>() {
+			public void handle(org.vertx.java.core.eventbus.Message<byte[]> message) {
+				onIncomingDataPacket(message);
 			}
-		});
+		};
+		vertx.eventBus().registerHandler(BUS_ADDRESS, myHandler);
 	}
 
 	public void stop() {
-		logger.info("Closing");
-		if (socket != null)
-			socket.close();
+		logger.info("Closing ResolutionVerticle..");
+		vertx.eventBus().unregisterHandler(BUS_ADDRESS, myHandler);
 	}
 
-	private void onIncomingDataPacket(DatagramPacket packet) {
-		logger.info("UDP request received");
+	private void onIncomingDataPacket(org.vertx.java.core.eventbus.Message<byte[]> vertxBusMessage) {
+		logger.info("Resolution request received");
 		statsManager.increaseQueryReceived();
 
 		ProcessingContext s = new ProcessingContext();
 
 		try {
 			// Interpret input data
-			s.requestSender = packet.sender();
-			s.queryMessage = new Message(packet.data().getBytes());
+			s.vertxBusMessage = vertxBusMessage;
+			s.queryMessage = new Message(s.vertxBusMessage.body());
 			s.queryRecord = s.queryMessage.getQuestion();
 			logger.info("Request is: \"" + s.queryRecord.toString() + "\"");
 
@@ -139,7 +124,7 @@ public class ListenerVerticle extends Verticle {
 							case Rcode.NXDOMAIN:
 								s.returnCode = Rcode.NXDOMAIN;
 								generateResponse(s);
-								sendResponse(s);
+								s.vertxBusMessage.reply(s.response);
 								break;
 							case Rcode.NOERROR:
 								if (response.getHeader().getFlag(Flags.AA)) {
@@ -151,7 +136,12 @@ public class ListenerVerticle extends Verticle {
 									s.answerRS = response.getSectionArray(Section.ANSWER);
 									s.returnCode = Rcode.NOERROR;
 									generateResponse(s);
-									sendResponse(s);
+									if (s.saveAnswersToStore) {
+										logger.trace("Saving to store");
+										store.putRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
+												s.queryRecord.getDClass(), s.answerRS);
+									}
+									s.vertxBusMessage.reply(s.response);
 								} else {
 									if (response.getSectionArray(Section.ANSWER).length == 0
 											&& response.getSectionArray(Section.AUTHORITY).length > 0) {
@@ -213,10 +203,9 @@ public class ListenerVerticle extends Verticle {
 		}
 
 		if (s.responseReady) {
-			sendResponse(s);
+			s.vertxBusMessage.reply(s.response);
 		} else {
 			logger.error("Unhandled internal error, this request was not answered.");
-
 		}
 	}
 
@@ -251,32 +240,9 @@ public class ListenerVerticle extends Verticle {
 				}
 			}
 		}
-		byte[] response = msg.toWire(UdpServerRunnable.DNS_UDP_MAXLENGTH);
-		s.responseBuffer = new Buffer(response);
+		s.response = msg.toWire(UdpServerRunnable.DNS_UDP_MAXLENGTH);
 		s.responseReady = true;
 		logger.info("Ready to be transmitted");
-	}
-
-	private void sendResponse(ProcessingContext s) {
-		logger.info("Sending response to " + s.requestSender.getAddress().getHostAddress() + " on port "
-				+ s.requestSender.getPort());
-		socket.send(s.responseBuffer, s.requestSender.getAddress().getHostAddress(), s.requestSender.getPort(),
-				new AsyncResultHandler<DatagramSocket>() {
-					public void handle(AsyncResult<DatagramSocket> asyncResult) {
-						if (asyncResult.succeeded()) {
-							logger.info("Response sent successfully" + " " + s.queryRecord);
-							if (s.saveAnswersToStore) {
-								logger.info("Saving to store");
-								store.putRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
-										s.queryRecord.getDClass(), s.answerRS);
-							}
-						} else {
-							logger.error("Failed to send response", asyncResult.cause());
-						}
-
-					}
-
-				});
 	}
 
 	private void foobar(ProcessingContext s) throws Exception {

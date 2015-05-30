@@ -1,13 +1,13 @@
 // http://vertx.io/mods_manual.html
 
 {
-  "main":"net.pierreroudier.pacnas.ListenerVerticle",
+  "main":"net.pierreroudier.pacnas.MainVerticle",
 
   "description":"Pacnas, the ProActive Caching NAmeServer",
   "licenses": ["The Apache Software License Version 2.0"],
   "author": "Pierre ROUDIER",
   "homepage": "pierreroudier.net",
 
-  "auto-redeploy": true,
+  "auto-redeploy": false,
   "resident": true
 }
