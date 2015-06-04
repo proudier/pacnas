@@ -127,6 +127,9 @@ public class ResolutionVerticle extends Verticle {
 							switch (response.getRcode()) {
 							case Rcode.NXDOMAIN:
 								s.returnCode = Rcode.NXDOMAIN;
+								if (s.recursionCtx.socket != null) {
+									s.recursionCtx.socket.close();
+								}
 								generateResponse(s);
 								logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
 								s.vertxBusMessage.reply(s.response);
@@ -141,6 +144,9 @@ public class ResolutionVerticle extends Verticle {
 									}
 									s.answerRS = response.getSectionArray(Section.ANSWER);
 									s.returnCode = Rcode.NOERROR;
+									if (s.recursionCtx.socket != null) {
+										s.recursionCtx.socket.close();
+									}
 									generateResponse(s);
 									if (s.saveAnswersToStore) {
 										logger.trace("Saving to store");
