@@ -21,7 +21,7 @@ Thanks goes to:
 Using Maven:
 
 ```
-mvn package
+mvn clean package -Dmaven.test.skip=true
 ```
 
 ## How to Run 
@@ -29,5 +29,5 @@ mvn package
 Once built:
 
 ```
-vertx run runzip target/pacnas-0.0.1-SNAPSHOT-mod.zip
+mvn vertx:runMod -Dmaven.test.skip=true
 ```
