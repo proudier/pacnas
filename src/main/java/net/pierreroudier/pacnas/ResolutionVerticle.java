@@ -1,5 +1,8 @@
 package net.pierreroudier.pacnas;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import net.pierreroudier.pacnas.store.InMemoryJavaHashmapStore;
 import net.pierreroudier.pacnas.store.Store;
 
@@ -19,6 +22,7 @@ import org.xbill.DNS.Opcode;
 import org.xbill.DNS.Rcode;
 import org.xbill.DNS.Record;
 import org.xbill.DNS.Section;
+import org.xbill.DNS.Type;
 
 public class ResolutionVerticle extends Verticle {
 	public static String BUS_ADDRESS = "r";
@@ -58,10 +62,10 @@ public class ResolutionVerticle extends Verticle {
 	}
 
 	private void onIncomingDataPacket(org.vertx.java.core.eventbus.Message<byte[]> vertxBusMessage) {
-		logger.info("Resolution request received");
+		logger.info("Resolution request received via Vertx bus (msg hash="+vertxBusMessage.hashCode()+")");
 		statsManager.increaseQueryReceived();
 
-		ProcessingContext s = new ProcessingContext();
+		final ProcessingContext s = new ProcessingContext();
 
 		try {
 			// Interpret input data
@@ -75,6 +79,7 @@ public class ResolutionVerticle extends Verticle {
 				logger.info("Request has format error");
 				s.returnCode = Rcode.FORMERR;
 				generateResponse(s);
+			
 			}
 			if (s.queryMessage.getHeader().getOpcode() != Opcode.QUERY) {
 				logger.info("Handling this kind of request is not implemented");
@@ -83,22 +88,21 @@ public class ResolutionVerticle extends Verticle {
 			}
 
 			// Query cache
-			s.answerRS = store.getRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
-					s.queryRecord.getDClass());
+			s.answerRS = store.getRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(), s.queryRecord.getDClass());
 			if (s.answerRS != null) {
 				logger.info("Answering from cache");
 				statsManager.increaseQueryAnsweredFromCache();
 				s.returnCode = Rcode.NOERROR;
 				generateResponse(s);
 			} else {
-				logger.info("Starting recursive resolution..");
+				logger.info("Not found in cache, starting recursive resolution..");
 				s.saveAnswersToStore = true;
+				statsManager.increaseQueryAnsweredFromForwarder();
 
 				s.recursionCtx = new RecursionContext();
 				s.recursionCtx.socket = vertx.createDatagramSocket(InternetProtocolFamily.IPv4);
 				s.recursionCtx.currentNS = RecursionContext.ROOT_NS;
-				Record queryRecord = Record.newRecord(s.queryRecord.getName(), s.queryRecord.getType(),
-						s.queryRecord.getDClass());
+				Record queryRecord = Record.newRecord(s.queryRecord.getName(), s.queryRecord.getType(), s.queryRecord.getDClass());
 				s.recursionCtx.queryMessage = Message.newQuery(queryRecord);
 				s.recursionCtx.queryMessage.getHeader().unsetFlag(Flags.RD);
 
@@ -114,8 +118,8 @@ public class ResolutionVerticle extends Verticle {
 								throw new Exception("response.getRcode() != response.getHeader().getRcode()");
 							}
 
-							logger.info("Received  " + response.getSectionArray(Section.QUESTION).length
-									+ " question, " + response.getSectionArray(Section.ANSWER).length + " answer, "
+							logger.info("Received " + response.getSectionArray(Section.QUESTION).length + " question, "
+									+ response.getSectionArray(Section.ANSWER).length + " answer, "
 									+ response.getSectionArray(Section.AUTHORITY).length + " authority, "
 									+ response.getSectionArray(Section.ADDITIONAL).length + " additional. Rcode="
 									+ Rcode.string(response.getRcode()));
@@ -124,10 +128,12 @@ public class ResolutionVerticle extends Verticle {
 							case Rcode.NXDOMAIN:
 								s.returnCode = Rcode.NXDOMAIN;
 								generateResponse(s);
+								logger.info("Replying to message with hash=" + s.vertxBusMessage.hashCode());
 								s.vertxBusMessage.reply(s.response);
 								break;
 							case Rcode.NOERROR:
 								if (response.getHeader().getFlag(Flags.AA)) {
+									// Authoritative answer
 									if (response.getSectionArray(Section.ANSWER).length > 0) {
 										logger.info("Got authoritative answer with ANSWER records");
 									} else {
@@ -141,41 +147,79 @@ public class ResolutionVerticle extends Verticle {
 										store.putRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
 												s.queryRecord.getDClass(), s.answerRS);
 									}
+									logger.info("Replying to message with hash=" + s.vertxBusMessage.hashCode());
 									s.vertxBusMessage.reply(s.response);
 								} else {
+									// Non Authoritative answer
 									if (response.getSectionArray(Section.ANSWER).length == 0
 											&& response.getSectionArray(Section.AUTHORITY).length > 0) {
 										logger.info("Response is a redirection to referral");
 
-										String server = response.getSectionArray(Section.AUTHORITY)[0]
-												.getAdditionalName().toString();
-										logger.info("Now using " + server);
+										if (response.getSectionArray(Section.ADDITIONAL).length > 0) {
+											for (Record authorityRecord : response.getSectionArray(Section.AUTHORITY)) {
+												if (authorityRecord.getType() != Type.NS) {
+													logger.warn("ignored authority record because type!=NS");
+													continue;
+												}
 
-										s.recursionCtx.currentNS = Address.getByName(server);
-										foobar(s);
+												String authorityName = authorityRecord.rdataToString();
+												logger.info("Looking for the following referral's IP in ADDITIONAL section: \""
+														+ authorityName + "\"");
 
-										// Record authorityRecord =
-										// response.getSectionArray(Section.AUTHORITY)[0];
-										// Record authorityIpRecordQuery =
-										// Record.newRecord(
-										// authorityRecord.getAdditionalName(),
-										// Type.A,
-										// authorityRecord.getDClass());
-										// Record[] records =
-										// recurse(authorityIpRecordQuery);
-										// if (records != null) {
-										// logger.info("Resolved referral " +
-										// authorityRecord.getAdditionalName()
-										// + " to IP " +
-										// records[0].rdataToString());
-										// s.recursionCtx.currentNS =
-										// Address.getByAddress(records[0].rdataToString());
-										// foobar(s);
-										// } else {
-										// throw new
-										// Exception("we\'re not supposed to be here");
-										// }
+												List<String> authNsIp = new ArrayList<String>();
+												for (Record additionnalRecord : response.getSectionArray(Section.ADDITIONAL)) {
+													if (additionnalRecord.getName().toString().equals(authorityName)) {
+														String s = additionnalRecord.rdataToString();
+														logger.info("Found referral's IP: \"" + s + "\"");
+														if (s.indexOf(':') == -1) {
+															// ipv4
+															authNsIp.add(s);
+														} else {
+															// ipv6
+															logger.trace("IPv6 address discarded");
+														}
+													}
+												}
+												if (authNsIp.size() == 0) {
+													logger.info("Referral IP was not found in ADDITIONNAL section");
+												} else {
+													s.recursionCtx.currentNS = Address.getByAddress(authNsIp.get(0));
+													logger.info("Now using remove nameserver \"" + authorityName + "\" ("
+															+ s.recursionCtx.currentNS.getHostAddress() + ")");
+													foobar(s);
+												}
+												break;
+											}
+										} else {
 
+											String server = response.getSectionArray(Section.AUTHORITY)[0].getAdditionalName().toString();											
+											logger.info("Referral is \"" + server +"\" but no ADDITIONNAL section provided, starting resolution.. ");
+
+											// Gotta find the authoritative
+											// server's IP
+											Record authorityRecord = response.getSectionArray(Section.AUTHORITY)[0];
+											Record authorityIpRecordQuery = Record.newRecord(authorityRecord.getAdditionalName(), Type.A,
+													authorityRecord.getDClass());
+											byte[] requestNsBytesArray = Message.newQuery(authorityIpRecordQuery).toWire(
+													UdpServerRunnable.DNS_UDP_MAXLENGTH);
+											
+											vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, requestNsBytesArray,
+													new Handler<org.vertx.java.core.eventbus.Message<byte[]>>() {
+														public void handle(org.vertx.java.core.eventbus.Message<byte[]> m) {
+															try {
+																Message mmm = new Message(m.body());
+																Record[] records = mmm.getSectionArray(Section.ANSWER);
+																logger.trace("Resolved referral " + authorityRecord.getAdditionalName()
+																		+ " to IP " + records[0].rdataToString());
+																s.recursionCtx.currentNS = Address.getByAddress(records[0].rdataToString());
+																foobar(s);
+															} catch (Exception e) {
+																e.printStackTrace();
+															}
+														}
+
+													});
+										}
 									} else {
 										throw new Exception("we\'re not supposed to be here");
 									}
@@ -203,9 +247,8 @@ public class ResolutionVerticle extends Verticle {
 		}
 
 		if (s.responseReady) {
+			logger.info("Replying to message with hash=" + s.vertxBusMessage.hashCode());
 			s.vertxBusMessage.reply(s.response);
-		} else {
-			logger.error("Unhandled internal error, this request was not answered.");
 		}
 	}
 

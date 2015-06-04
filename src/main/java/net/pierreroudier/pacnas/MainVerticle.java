@@ -11,7 +11,6 @@ public class MainVerticle extends Verticle {
 		logger.info("Starting MainVerticle..");
 		container.deployVerticle("net.pierreroudier.pacnas.UdpListenerVerticle");
 		container.deployVerticle("net.pierreroudier.pacnas.ResolutionVerticle");
-		logger.info("Pacnas is ready and waiting for requests");
 	}
 
 	public void stop() {

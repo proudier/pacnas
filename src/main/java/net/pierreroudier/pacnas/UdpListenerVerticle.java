@@ -40,7 +40,7 @@ public class UdpListenerVerticle extends Verticle {
 						public void handle(DatagramPacket packet) {
 							logger.info("UDP request received");
 
-							InetSocketAddress requestSender = packet.sender();
+							final InetSocketAddress requestSender = packet.sender();
 
 							vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, packet.data().getBytes(),
 									new Handler<Message<byte[]>>() {
