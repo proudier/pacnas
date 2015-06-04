@@ -37,7 +37,7 @@ public class ResolutionVerticle extends Verticle {
 
 	public void start() {
 		logger = container.logger();
-		logger.info("Starting ResolutionVerticle..");
+		logger.trace("Starting ResolutionVerticle..");
 
 		onSentToRemoteServer = new AsyncResultHandler<DatagramSocket>() {
 			public void handle(AsyncResult<DatagramSocket> asyncResult) {
@@ -62,7 +62,7 @@ public class ResolutionVerticle extends Verticle {
 	}
 
 	private void onIncomingDataPacket(org.vertx.java.core.eventbus.Message<byte[]> vertxBusMessage) {
-		logger.info("Resolution request received via Vertx bus (msg hash="+vertxBusMessage.hashCode()+")");
+		logger.trace("Resolution request received via Vertx bus (msg hash="+vertxBusMessage.hashCode()+")");
 		statsManager.increaseQueryReceived();
 
 		final ProcessingContext s = new ProcessingContext();
@@ -72,7 +72,7 @@ public class ResolutionVerticle extends Verticle {
 			s.vertxBusMessage = vertxBusMessage;
 			s.queryMessage = new Message(s.vertxBusMessage.body());
 			s.queryRecord = s.queryMessage.getQuestion();
-			logger.info("Request is: \"" + s.queryRecord.toString() + "\"");
+			logger.trace("Request is: \"" + s.queryRecord.toString() + "\"");
 
 			// Basic error check
 			if (s.queryMessage.getHeader().getFlag(Flags.QR) || s.queryMessage.getHeader().getRcode() != Rcode.NOERROR) {
@@ -90,12 +90,12 @@ public class ResolutionVerticle extends Verticle {
 			// Query cache
 			s.answerRS = store.getRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(), s.queryRecord.getDClass());
 			if (s.answerRS != null) {
-				logger.info("Answering from cache");
+				logger.trace("Answering from cache");
 				statsManager.increaseQueryAnsweredFromCache();
 				s.returnCode = Rcode.NOERROR;
 				generateResponse(s);
 			} else {
-				logger.info("Not found in cache, starting recursive resolution..");
+				logger.trace("Not found in cache, starting recursive resolution..");
 				s.saveAnswersToStore = true;
 				statsManager.increaseQueryAnsweredFromForwarder();
 
@@ -118,7 +118,7 @@ public class ResolutionVerticle extends Verticle {
 								throw new Exception("response.getRcode() != response.getHeader().getRcode()");
 							}
 
-							logger.info("Received " + response.getSectionArray(Section.QUESTION).length + " question, "
+							logger.trace("Received " + response.getSectionArray(Section.QUESTION).length + " question, "
 									+ response.getSectionArray(Section.ANSWER).length + " answer, "
 									+ response.getSectionArray(Section.AUTHORITY).length + " authority, "
 									+ response.getSectionArray(Section.ADDITIONAL).length + " additional. Rcode="
@@ -128,16 +128,16 @@ public class ResolutionVerticle extends Verticle {
 							case Rcode.NXDOMAIN:
 								s.returnCode = Rcode.NXDOMAIN;
 								generateResponse(s);
-								logger.info("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+								logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
 								s.vertxBusMessage.reply(s.response);
 								break;
 							case Rcode.NOERROR:
 								if (response.getHeader().getFlag(Flags.AA)) {
 									// Authoritative answer
 									if (response.getSectionArray(Section.ANSWER).length > 0) {
-										logger.info("Got authoritative answer with ANSWER records");
+										logger.trace("Got authoritative answer with ANSWER records");
 									} else {
-										logger.info("Got empty authoritative answer");
+										logger.trace("Got empty authoritative answer");
 									}
 									s.answerRS = response.getSectionArray(Section.ANSWER);
 									s.returnCode = Rcode.NOERROR;
@@ -147,13 +147,13 @@ public class ResolutionVerticle extends Verticle {
 										store.putRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
 												s.queryRecord.getDClass(), s.answerRS);
 									}
-									logger.info("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+									logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
 									s.vertxBusMessage.reply(s.response);
 								} else {
 									// Non Authoritative answer
 									if (response.getSectionArray(Section.ANSWER).length == 0
 											&& response.getSectionArray(Section.AUTHORITY).length > 0) {
-										logger.info("Response is a redirection to referral");
+										logger.trace("Response is a redirection to referral");
 
 										if (response.getSectionArray(Section.ADDITIONAL).length > 0) {
 											for (Record authorityRecord : response.getSectionArray(Section.AUTHORITY)) {
@@ -163,14 +163,14 @@ public class ResolutionVerticle extends Verticle {
 												}
 
 												String authorityName = authorityRecord.rdataToString();
-												logger.info("Looking for the following referral's IP in ADDITIONAL section: \""
+												logger.trace("Looking for the following referral's IP in ADDITIONAL section: \""
 														+ authorityName + "\"");
 
 												List<String> authNsIp = new ArrayList<String>();
 												for (Record additionnalRecord : response.getSectionArray(Section.ADDITIONAL)) {
 													if (additionnalRecord.getName().toString().equals(authorityName)) {
 														String s = additionnalRecord.rdataToString();
-														logger.info("Found referral's IP: \"" + s + "\"");
+														logger.trace("Found referral's IP: \"" + s + "\"");
 														if (s.indexOf(':') == -1) {
 															// ipv4
 															authNsIp.add(s);
@@ -181,10 +181,10 @@ public class ResolutionVerticle extends Verticle {
 													}
 												}
 												if (authNsIp.size() == 0) {
-													logger.info("Referral IP was not found in ADDITIONNAL section");
+													logger.trace("Referral IP was not found in ADDITIONNAL section");
 												} else {
 													s.recursionCtx.currentNS = Address.getByAddress(authNsIp.get(0));
-													logger.info("Now using remove nameserver \"" + authorityName + "\" ("
+													logger.trace("Now using remove nameserver \"" + authorityName + "\" ("
 															+ s.recursionCtx.currentNS.getHostAddress() + ")");
 													foobar(s);
 												}
@@ -193,7 +193,7 @@ public class ResolutionVerticle extends Verticle {
 										} else {
 
 											String server = response.getSectionArray(Section.AUTHORITY)[0].getAdditionalName().toString();											
-											logger.info("Referral is \"" + server +"\" but no ADDITIONNAL section provided, starting resolution.. ");
+											logger.trace("Referral is \"" + server +"\" but no ADDITIONNAL section provided, starting resolution.. ");
 
 											// Gotta find the authoritative
 											// server's IP
@@ -247,13 +247,13 @@ public class ResolutionVerticle extends Verticle {
 		}
 
 		if (s.responseReady) {
-			logger.info("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+			logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
 			s.vertxBusMessage.reply(s.response);
 		}
 	}
 
 	private void generateResponse(ProcessingContext s) {
-		logger.info("Preparing response..");
+		logger.trace("Preparing response..");
 
 		if (s.returnCode == ProcessingContext.RETURN_CODE_INVALID_VALUE) {
 			logger.error("No return code was set, assuming SERVFAIL");
@@ -279,13 +279,13 @@ public class ResolutionVerticle extends Verticle {
 			for (Record r : s.answerRS) {
 				if (r != null) {
 					msg.addRecord(r, Section.ANSWER);
-					logger.info(">> " + r.toString());
+					logger.trace(">> " + r.toString());
 				}
 			}
 		}
 		s.response = msg.toWire(UdpServerRunnable.DNS_UDP_MAXLENGTH);
 		s.responseReady = true;
-		logger.info("Ready to be transmitted");
+		logger.trace("Ready to be transmitted");
 	}
 
 	private void foobar(ProcessingContext s) throws Exception {
@@ -295,7 +295,7 @@ public class ResolutionVerticle extends Verticle {
 			s.recursionCtx.infiniteLoopProtection++;
 		}
 
-		logger.info("Sending question to remote nameserver " + s.recursionCtx.currentNS.getHostAddress() + ": \""
+		logger.trace("Sending question to remote nameserver " + s.recursionCtx.currentNS.getHostAddress() + ": \""
 				+ s.recursionCtx.queryMessage.getQuestion() + "\"");
 
 		Buffer buffer = new Buffer(s.recursionCtx.queryMessage.toWire(UdpServerRunnable.DNS_UDP_MAXLENGTH));

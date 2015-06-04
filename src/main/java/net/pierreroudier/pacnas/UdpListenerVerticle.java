@@ -27,7 +27,7 @@ public class UdpListenerVerticle extends Verticle {
 
 	public void start() {
 		logger = container.logger();
-		logger.info("Starting UDP Listener..");
+		logger.trace("Starting UDP Listener..");
 
 		String addr = "0.0.0.0";
 		int port = 5353;
@@ -38,7 +38,7 @@ public class UdpListenerVerticle extends Verticle {
 				if (asyncResult.succeeded()) {
 					socket.dataHandler(new Handler<DatagramPacket>() {
 						public void handle(DatagramPacket packet) {
-							logger.info("UDP request received");
+							logger.trace("UDP request received");
 
 							final InetSocketAddress requestSender = packet.sender();
 
@@ -46,7 +46,7 @@ public class UdpListenerVerticle extends Verticle {
 									new Handler<Message<byte[]>>() {
 										public void handle(Message<byte[]> message) {
 
-											logger.info("Sending response to "
+											logger.trace("Sending response to "
 													+ requestSender.getAddress().getHostAddress() + " on port "
 													+ requestSender.getPort());
 
@@ -56,7 +56,7 @@ public class UdpListenerVerticle extends Verticle {
 													new AsyncResultHandler<DatagramSocket>() {
 														public void handle(AsyncResult<DatagramSocket> asyncResult) {
 															if (asyncResult.succeeded()) {
-																logger.info("Response sent successfully");
+																logger.trace("Response sent successfully");
 															} else {
 																logger.error("Failed to send response",
 																		asyncResult.cause());
@@ -80,7 +80,7 @@ public class UdpListenerVerticle extends Verticle {
 	}
 
 	public void stop() {
-		logger.info("Closing..");
+		logger.info("Closing UdpListenerVerticle..");
 		if (socket != null)
 			socket.close();
 	}
