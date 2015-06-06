@@ -6,7 +6,6 @@ import org.vertx.java.core.AsyncResult;
 import org.vertx.java.core.AsyncResultHandler;
 import org.vertx.java.core.Handler;
 import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.datagram.DatagramPacket;
 import org.vertx.java.core.datagram.DatagramSocket;
 import org.vertx.java.core.datagram.InternetProtocolFamily;
 import org.vertx.java.core.eventbus.Message;
@@ -33,48 +32,38 @@ public class UdpListenerVerticle extends Verticle {
 		int port = 5353;
 		socket = vertx.createDatagramSocket(InternetProtocolFamily.IPv4);
 		socket.setReuseAddress(true);
-		socket.listen(addr, port, new AsyncResultHandler<DatagramSocket>() {
-			public void handle(AsyncResult<DatagramSocket> asyncResult) {
-				if (asyncResult.succeeded()) {
-					socket.dataHandler(new Handler<DatagramPacket>() {
-						public void handle(DatagramPacket packet) {
-							logger.trace("UDP request received");
+		socket.listen(addr, port, asyncResult -> {
+			if (asyncResult.succeeded()) {
+				socket.dataHandler(packet -> {
+					logger.trace("UDP request received");
 
-							final InetSocketAddress requestSender = packet.sender();
+					final InetSocketAddress requestSender = packet.sender();
 
-							vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, packet.data().getBytes(),
-									new Handler<Message<byte[]>>() {
-										public void handle(Message<byte[]> message) {
+					vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, packet.data().getBytes(), new Handler<Message<byte[]>>() {
+						public void handle(Message<byte[]> message) {
+							logger.trace("Sending response to " + requestSender.getAddress().getHostAddress() + " on port "
+									+ requestSender.getPort());
 
-											logger.trace("Sending response to "
-													+ requestSender.getAddress().getHostAddress() + " on port "
-													+ requestSender.getPort());
+							socket.send(new Buffer(message.body()), requestSender.getAddress().getHostAddress(), requestSender.getPort(),
+									new AsyncResultHandler<DatagramSocket>() {
+										public void handle(AsyncResult<DatagramSocket> asyncResult) {
+											if (asyncResult.succeeded()) {
+												logger.trace("Response sent successfully");
+											} else {
+												logger.error("Failed to send response", asyncResult.cause());
+											}
 
-											socket.send(new Buffer(message.body()),
-													requestSender.getAddress().getHostAddress(),
-													requestSender.getPort(), 
-													new AsyncResultHandler<DatagramSocket>() {
-														public void handle(AsyncResult<DatagramSocket> asyncResult) {
-															if (asyncResult.succeeded()) {
-																logger.trace("Response sent successfully");
-															} else {
-																logger.error("Failed to send response",
-																		asyncResult.cause());
-															}
-
-														}
-
-													});
 										}
+
 									});
 						}
 					});
-				} else {
-					logger.error("Listen failed", asyncResult.cause());
-					if (socket != null)
-						socket.close();
-					container.exit();
-				}
+				});
+			} else {
+				logger.error("Listen failed", asyncResult.cause());
+				if (socket != null)
+					socket.close();
+				container.exit();
 			}
 		});
 	}
