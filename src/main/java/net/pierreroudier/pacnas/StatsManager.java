@@ -4,12 +4,12 @@ package net.pierreroudier.pacnas;
 public class StatsManager {
 	private long queryReceived;
 	private long queryAnsweredFromCache;
-	private long queryAnsweredFromForwarder;
+	private long queryAnsweredByResolution;
 
 	public StatsManager() {
 		queryReceived = 0;
 		queryAnsweredFromCache = 0;
-		queryAnsweredFromForwarder = 0;
+		queryAnsweredByResolution = 0;
 	}
 
 	public void increaseQueryReceived() {
@@ -20,8 +20,8 @@ public class StatsManager {
 		queryAnsweredFromCache++;
 	}
 
-	public void increaseQueryAnsweredFromForwarder() {
-		queryAnsweredFromForwarder++;
+	public void increaseQueryAnsweredByResolution() {
+		queryAnsweredByResolution++;
 	}
 
 	public long getQueryReceived() {
@@ -32,8 +32,8 @@ public class StatsManager {
 		return queryAnsweredFromCache;
 	}
 
-	public long getQueryAnsweredFromForwarder() {
-		return queryAnsweredFromForwarder;
+	public long getQueryAnsweredByResolution() {
+		return queryAnsweredByResolution;
 	}
 
 }

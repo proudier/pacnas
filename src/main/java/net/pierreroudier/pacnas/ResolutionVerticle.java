@@ -90,7 +90,7 @@ public class ResolutionVerticle extends Verticle {
 			} else {
 				logger.trace("Not found in cache, starting recursive resolution..");
 				s.saveAnswersToStore = true;
-				statsManager.increaseQueryAnsweredFromForwarder();
+				statsManager.increaseQueryAnsweredByResolution();
 
 				s.recursionCtx = new RecursionContext();
 				s.recursionCtx.socket = vertx.createDatagramSocket(InternetProtocolFamily.IPv4);

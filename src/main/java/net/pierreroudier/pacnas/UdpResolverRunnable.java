@@ -93,7 +93,7 @@ public class UdpResolverRunnable implements Runnable {
 					statsManager.increaseQueryAnsweredFromCache();
 				} else {
 					answerRS = recurse(queryRecord);
-					statsManager.increaseQueryAnsweredFromForwarder();
+					statsManager.increaseQueryAnsweredByResolution();
 					saveAnswersToStore = true;
 				}
 
