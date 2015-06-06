@@ -72,7 +72,6 @@ public class ResolutionVerticle extends Verticle {
 				logger.info("Request has format error");
 				s.returnCode = Rcode.FORMERR;
 				generateResponse(s);
-			
 			}
 			if (s.queryMessage.getHeader().getOpcode() != Opcode.QUERY) {
 				logger.info("Handling this kind of request is not implemented");
@@ -104,10 +103,17 @@ public class ResolutionVerticle extends Verticle {
 				s.recursionCtx.socket.dataHandler(dataPacket -> {
 					try {
 						Message response = new Message(dataPacket.data().getBytes());
-						if (s.recursionCtx.queryMessage.getHeader().getID() != response.getHeader().getID())
-							throw new Exception("ID mismatch, remote server is broken");
+						
+						// Basic error check
+						if (s.recursionCtx.queryMessage.getHeader().getID() != response.getHeader().getID()) {
+							logger.info("ID mismatch, remote server is broken");
+							s.returnCode = Rcode.NOERROR;
+							generateResponse(s);
+						}
 						if (response.getRcode() != response.getHeader().getRcode()) {
-							throw new Exception("response.getRcode() != response.getHeader().getRcode()");
+							logger.info("response.getRcode() != response.getHeader().getRcode()");
+							s.returnCode = Rcode.NOERROR;
+							generateResponse(s);
 						}
 
 						logger.trace("Received " + response.getSectionArray(Section.QUESTION).length + " question, "
@@ -119,12 +125,18 @@ public class ResolutionVerticle extends Verticle {
 						switch (response.getRcode()) {
 						case Rcode.NXDOMAIN:
 							s.returnCode = Rcode.NXDOMAIN;
-							if (s.recursionCtx.socket != null) {
-								s.recursionCtx.socket.close();
-							}
+							s.answerRS = null;
 							generateResponse(s);
-							logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-							s.vertxBusMessage.reply(s.response);
+							break;
+						case Rcode.REFUSED:
+							s.returnCode = Rcode.REFUSED;
+							s.answerRS = null;
+							generateResponse(s);
+							break;
+						case Rcode.SERVFAIL:
+							s.returnCode = Rcode.NOERROR;
+							s.answerRS = null;
+							generateResponse(s);
 							break;
 						case Rcode.NOERROR:
 							if (response.getHeader().getFlag(Flags.AA)) {
@@ -136,17 +148,12 @@ public class ResolutionVerticle extends Verticle {
 								}
 								s.answerRS = response.getSectionArray(Section.ANSWER);
 								s.returnCode = Rcode.NOERROR;
-								if (s.recursionCtx.socket != null) {
-									s.recursionCtx.socket.close();
-								}
 								generateResponse(s);
 								if (s.saveAnswersToStore) {
 									logger.trace("Saving to store");
 									store.putRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
 											s.queryRecord.getDClass(), s.answerRS);
 								}
-								logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-								s.vertxBusMessage.reply(s.response);
 							} else {
 								// Non Authoritative answer
 								if (response.getSectionArray(Section.ANSWER).length == 0
@@ -189,12 +196,10 @@ public class ResolutionVerticle extends Verticle {
 											break;
 										}
 									} else {
-
 										String server = response.getSectionArray(Section.AUTHORITY)[0].getAdditionalName().toString();											
 										logger.trace("Referral is \"" + server +"\" but no ADDITIONNAL section provided, starting resolution.. ");
 
-										// Gotta find the authoritative
-										// server's IP
+										// Gotta find the authoritative server's IP
 										Record authorityRecord = response.getSectionArray(Section.AUTHORITY)[0];
 										Record authorityIpRecordQuery = Record.newRecord(authorityRecord.getAdditionalName(), Type.A,
 												authorityRecord.getDClass());
@@ -207,19 +212,37 @@ public class ResolutionVerticle extends Verticle {
 														try {
 															Message mmm = new Message(m.body());
 															Record[] records = mmm.getSectionArray(Section.ANSWER);
-															logger.trace("Resolved referral " + authorityRecord.getAdditionalName()
-																	+ " to IP " + records[0].rdataToString());
-															s.recursionCtx.currentNS = Address.getByAddress(records[0].rdataToString());
-															foobar(s);
+															if(records.length > 0) {
+																logger.trace("Resolved referral " + authorityRecord.getAdditionalName()
+																		+ " to IP " + records[0].rdataToString());
+																s.recursionCtx.currentNS = Address.getByAddress(records[0].rdataToString());
+																foobar(s);
+															} else {
+																logger.trace("Found no IP for referral");
+																s.returnCode = Rcode.NOERROR;
+																s.answerRS = null;
+																generateResponse(s);
+															}
 														} catch (Exception e) {
-															e.printStackTrace();
+															logger.error("Oups", e);
+															s.returnCode = Rcode.SERVFAIL;
+															s.answerRS = null;
+															generateResponse(s);
+														}
+														
+														if (s.responseReady) {
+															if (s.recursionCtx.socket != null) {
+																s.recursionCtx.socket.close();
+															}
+															logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+															s.vertxBusMessage.reply(s.response);
 														}
 													}
 
 												});
 									}
 								} else {
-									throw new Exception("we\'re not supposed to be here");
+									logger.error("we\'re not supposed to be here");
 								}
 							}
 							break;
@@ -229,18 +252,26 @@ public class ResolutionVerticle extends Verticle {
 									+ Rcode.string(response.getRcode()));
 						}
 					} catch (Exception e) {
-						logger.error(e);
+						logger.error("Oups", e);
+						s.returnCode = Rcode.SERVFAIL;
+						s.answerRS = null;
+						generateResponse(s);
+					}
+					
+					if (s.responseReady) {
 						if (s.recursionCtx.socket != null) {
 							s.recursionCtx.socket.close();
 						}
+						logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+						s.vertxBusMessage.reply(s.response);
 					}
 				});
 			}
 		} catch (Exception e) {
+			logger.error("Oups", e);
 			s.returnCode = Rcode.SERVFAIL;
 			s.answerRS = null;
 			generateResponse(s);
-			logger.error("Oups", e);
 		}
 
 		if (s.responseReady) {
@@ -250,39 +281,43 @@ public class ResolutionVerticle extends Verticle {
 	}
 
 	private void generateResponse(ProcessingContext s) {
-		logger.trace("Preparing response..");
-
-		if (s.returnCode == ProcessingContext.RETURN_CODE_INVALID_VALUE) {
-			logger.error("No return code was set, assuming SERVFAIL");
-			s.returnCode = Rcode.SERVFAIL;
-		}
-
-		Message msg = new Message();
-		msg.getHeader().setRcode(s.returnCode);
-		msg.getHeader().setFlag(Flags.RA);
-		msg.getHeader().setFlag(Flags.QR);
-
-		if (s.queryMessage != null && s.queryMessage.getHeader() != null) {
-			if (s.queryMessage.getHeader().getFlag(Flags.RD)) {
-				msg.getHeader().setFlag(Flags.RD);
+		if(s.responseReady == true) {
+			logger.fatal("Attempted to overwrite a response, but nothing was done. This is due to a falty logic in the code");
+		} else {		
+			logger.trace("Preparing response..");
+	
+			if (s.returnCode == ProcessingContext.RETURN_CODE_INVALID_VALUE) {
+				logger.error("No return code was set, assuming SERVFAIL");
+				s.returnCode = Rcode.SERVFAIL;
 			}
-			msg.getHeader().setID(s.queryMessage.getHeader().getID());
-		}
-		if (s.queryRecord != null) {
-			msg.addRecord(s.queryRecord, Section.QUESTION);
-		}
-
-		if (s.answerRS != null && s.answerRS.length > 0) {
-			for (Record r : s.answerRS) {
-				if (r != null) {
-					msg.addRecord(r, Section.ANSWER);
-					logger.trace(">> " + r.toString());
+	
+			Message msg = new Message();
+			msg.getHeader().setRcode(s.returnCode);
+			msg.getHeader().setFlag(Flags.RA);
+			msg.getHeader().setFlag(Flags.QR);
+	
+			if (s.queryMessage != null && s.queryMessage.getHeader() != null) {
+				if (s.queryMessage.getHeader().getFlag(Flags.RD)) {
+					msg.getHeader().setFlag(Flags.RD);
+				}
+				msg.getHeader().setID(s.queryMessage.getHeader().getID());
+			}
+			if (s.queryRecord != null) {
+				msg.addRecord(s.queryRecord, Section.QUESTION);
+			}
+	
+			if (s.answerRS != null && s.answerRS.length > 0) {
+				for (Record r : s.answerRS) {
+					if (r != null) {
+						msg.addRecord(r, Section.ANSWER);
+						logger.trace(">> " + r.toString());
+					}
 				}
 			}
+			s.response = msg.toWire(UdpServerRunnable.DNS_UDP_MAXLENGTH);
+			s.responseReady = true;
+			logger.trace("Ready to be transmitted");
 		}
-		s.response = msg.toWire(UdpServerRunnable.DNS_UDP_MAXLENGTH);
-		s.responseReady = true;
-		logger.trace("Ready to be transmitted");
 	}
 
 	private void foobar(ProcessingContext s) throws Exception {
