@@ -7,14 +7,8 @@
 	<artifactId>pacnas</artifactId>
 	<packaging>jar</packaging>
 	<version>0.0.1-SNAPSHOT</version>
-	<name>Project - pacnas</name>
-	<url>http://maven.apache.org</url>
-
-	<parent>
-		<groupId>org.sonatype.oss</groupId>
-		<artifactId>oss-parent</artifactId>
-		<version>7</version>
-	</parent>
+	<name>Pacnas: The ProActive Caching NAme-Server</name>
+	<url>https://github.com/proudier/pacnas</url>
 
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -94,12 +88,12 @@
 			<version>${vertx.testtools.version}</version>
 			<scope>test</scope>
 		</dependency>
+		<!--Project's dependencies -->
 		<dependency>
 			<groupId>dnsjava</groupId>
 			<artifactId>dnsjava</artifactId>
 			<version>2.1.7</version>
 		</dependency>
-
 	</dependencies>
 
 	<build>
