@@ -21,12 +21,14 @@ import org.vertx.java.platform.Verticle;
  */
 public class UdpListenerVerticle extends Verticle {
 
+	public static final int DNS_UDP_MAXLENGTH = 512;
+
 	private Logger logger;
 	private DatagramSocket socket;
 
 	public void start() {
 		logger = container.logger();
-		logger.trace("Starting UDP Listener..");
+		logger.info("Starting UDP Listener..");
 
 		String addr = "0.0.0.0";
 		int port = 5353;

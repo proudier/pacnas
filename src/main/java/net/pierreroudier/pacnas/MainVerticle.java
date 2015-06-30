@@ -9,8 +9,8 @@ public class MainVerticle extends Verticle {
 	public void start() {
 		logger = container.logger();
 		logger.info("Starting MainVerticle..");
-		container.deployVerticle("net.pierreroudier.pacnas.UdpListenerVerticle");
 		container.deployVerticle("net.pierreroudier.pacnas.ResolutionVerticle");
+		container.deployVerticle("net.pierreroudier.pacnas.UdpListenerVerticle");
 	}
 
 	public void stop() {
