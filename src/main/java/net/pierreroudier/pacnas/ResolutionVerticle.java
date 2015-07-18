@@ -15,7 +15,6 @@ import org.vertx.java.core.datagram.DatagramSocket;
 import org.vertx.java.core.datagram.InternetProtocolFamily;
 import org.vertx.java.core.logging.Logger;
 import org.vertx.java.platform.Verticle;
-import org.xbill.DNS.Address;
 import org.xbill.DNS.DClass;
 import org.xbill.DNS.Flags;
 import org.xbill.DNS.Message;
@@ -360,7 +359,7 @@ public class ResolutionVerticle extends Verticle {
 			}
 			String domainName = sb.toString();
 			Record[] records = store.getRecords(domainName, Type.NS, s.queryRecord.getDClass());
-			if (records.length > 0) {
+			if (records != null) {
 				for (Record r : records) {
 					nameServerList.add(r.getName().toString());
 				}
