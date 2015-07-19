@@ -1,77 +1,70 @@
 package net.pierreroudier.pacnas;
 
-import java.net.InetSocketAddress;
+import io.vertx.core.AbstractVerticle;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.datagram.DatagramSocket;
+import io.vertx.core.datagram.DatagramSocketOptions;
+import io.vertx.core.net.SocketAddress;
 
-import org.vertx.java.core.AsyncResult;
-import org.vertx.java.core.AsyncResultHandler;
-import org.vertx.java.core.Handler;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.datagram.DatagramSocket;
-import org.vertx.java.core.datagram.InternetProtocolFamily;
-import org.vertx.java.core.eventbus.Message;
-import org.vertx.java.core.logging.Logger;
-import org.vertx.java.platform.Verticle;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * Listen to UDP request and forward them to the ResolutionVerticle via the
  * Vertx bus
- * 
- * @author pierre
- *
  */
-public class UdpListenerVerticle extends Verticle {
+public class UdpListenerVerticle extends AbstractVerticle {
 
 	public static final int DNS_UDP_MAXLENGTH = 512;
 
-	private Logger logger;
+	private final Logger logger = LoggerFactory.getLogger(UdpListenerVerticle.class);
 	private DatagramSocket socket;
 
 	public void start() {
-		logger = container.logger();
-		logger.info("Starting UDP Listener..");
+		logger.trace("Starting UDP Listener");
 
+		// TODO should be stored in a configuration repository somewhere
 		String addr = "0.0.0.0";
 		int port = 5353;
-		socket = vertx.createDatagramSocket(InternetProtocolFamily.IPv4);
-		socket.setReuseAddress(true);
-		socket.listen(addr, port, asyncResult -> {
+
+		DatagramSocketOptions dso = new DatagramSocketOptions();
+		dso.setReuseAddress(true);
+		socket = vertx.createDatagramSocket(dso);
+
+		socket.listen(port, addr, asyncResult -> {
 			if (asyncResult.succeeded()) {
-				socket.dataHandler(packet -> {
-					logger.trace("UDP request received");
+				logger.info("Pacnas is listing for UDP request");
+				socket.handler(packet -> {
+					final SocketAddress requestSender = packet.sender();
+					logger.trace("UDP request received from {}", requestSender.host());
 
-					final InetSocketAddress requestSender = packet.sender();
-
-					vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, packet.data().getBytes(), new Handler<Message<byte[]>>() {
-						public void handle(Message<byte[]> message) {
-							logger.trace("Sending response to " + requestSender.getAddress().getHostAddress() + " on port "
-									+ requestSender.getPort());
-
-							socket.send(new Buffer(message.body()), requestSender.getAddress().getHostAddress(), requestSender.getPort(),
-									new AsyncResultHandler<DatagramSocket>() {
-										public void handle(AsyncResult<DatagramSocket> asyncResult) {
-											if (asyncResult.succeeded()) {
-												logger.trace("Response sent successfully");
-											} else {
-												logger.error("Failed to send response", asyncResult.cause());
-											}
-
-										}
-
-									});
+					vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, packet.data().getBytes(), busSendResult -> {
+						if (busSendResult.succeeded()) {
+							logger.trace("Sending response to {} on port {}", requestSender.host(), requestSender.port());
+							Buffer buffer = Buffer.buffer((byte[]) busSendResult.result().body());
+							socket.send(buffer, requestSender.port(), requestSender.host(), respSendResult -> {
+								if (respSendResult.succeeded()) {
+									logger.trace("Response sent successfully");
+								} else {
+									logger.warn("Failed to send response", respSendResult.cause());
+								}
+							});
+						} else {
+							logger.error("error", busSendResult.cause());
 						}
 					});
 				});
 			} else {
-				logger.error("Listen failed", asyncResult.cause());
+				logger.error("Listening failed; shutting down", asyncResult.cause());
 				if (socket != null)
 					socket.close();
-				container.exit();
+				vertx.close();
 			}
 		});
 	}
 
 	public void stop() {
-		logger.info("Closing UdpListenerVerticle..");
+		logger.trace("Stopping UdpListenerVerticle");
 		if (socket != null)
 			socket.close();
 	}

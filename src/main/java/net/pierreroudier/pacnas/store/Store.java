@@ -25,6 +25,10 @@ public interface Store {
 	public void putRecords(String queryName, int queryType, int queryClass, Record[] records);
 	
 	
+	/**
+	 * 
+	 * @return
+	 */
 	public List<String> getContentDump();
 	
 }

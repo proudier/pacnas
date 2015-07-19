@@ -1,9 +1,10 @@
 package net.pierreroudier.pacnas;
 
+import io.vertx.core.datagram.DatagramSocket;
+
 import java.util.List;
 import java.util.Vector;
 
-import org.vertx.java.core.datagram.DatagramSocket;
 import org.xbill.DNS.Message;
 
 public class RecursionContext {

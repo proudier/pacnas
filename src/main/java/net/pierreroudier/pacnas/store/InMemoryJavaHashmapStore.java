@@ -31,7 +31,7 @@ public class InMemoryJavaHashmapStore implements Store {
 			int queryClass = DClass.IN;
 			Record r1 = new ARecord(new Name(query), queryClass, 3600, InetAddress.getByName(query));
 			Record[] records = new Record[1];
-			putRecords(query, queryType, queryClass, records);
+			//putRecords(query, queryType, queryClass, records);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}

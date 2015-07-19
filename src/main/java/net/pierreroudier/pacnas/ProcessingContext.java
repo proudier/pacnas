@@ -6,7 +6,8 @@ import org.xbill.DNS.Record;
 public class ProcessingContext {
 	public static final int RETURN_CODE_INVALID_VALUE = -1;
 
-	public org.vertx.java.core.eventbus.Message<byte[]> vertxBusMessage;
+	public io.vertx.core.eventbus.Message<Object> vertxBusMessage;
+	public byte[] vertxBusMessageBody;
 
 	public Message queryMessage = null;
 	public Record queryRecord = null;

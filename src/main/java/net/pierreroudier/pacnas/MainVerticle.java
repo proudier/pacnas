@@ -1,20 +1,21 @@
 package net.pierreroudier.pacnas;
 
-import org.vertx.java.core.logging.Logger;
-import org.vertx.java.platform.Verticle;
+import io.vertx.core.AbstractVerticle;
 
-public class MainVerticle extends Verticle {
-	private Logger logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+public class MainVerticle extends AbstractVerticle {
+	private final Logger logger = LoggerFactory.getLogger(MainVerticle.class);
 
 	public void start() {
-		logger = container.logger();
-		logger.info("Starting MainVerticle..");
-		container.deployVerticle("net.pierreroudier.pacnas.ResolutionVerticle");
-		container.deployVerticle("net.pierreroudier.pacnas.UdpListenerVerticle");
+		logger.trace("Starting MainVerticle");
+		vertx.deployVerticle("net.pierreroudier.pacnas.ResolutionVerticle");
+		vertx.deployVerticle("net.pierreroudier.pacnas.UdpListenerVerticle");
 	}
 
 	public void stop() {
-		logger.info("Stopping MainVerticle..");
+		logger.trace("Stopping MainVerticle");
 	}
 
 }

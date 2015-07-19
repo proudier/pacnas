@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+	<timestamp key="bySecond" datePattern="yyyyMMdd'T'HHmmss" />
+
+	<appender name="FILE" class="ch.qos.logback.core.FileAppender">
+		<file>log-${bySecond}.txt</file>
+		<encoder>
+			<Pattern>%d{HH:mm:ss.SSS} [%thread] %-5level %logger{36} - %msg%n</Pattern>
+		</encoder>
+	</appender>
+
+  <logger name="net.pierreroudier.pacnas" level="TRACE"/>
+  
+	<root level="INFO">
+		<appender-ref ref="FILE" />
+	</root>
+</configuration>

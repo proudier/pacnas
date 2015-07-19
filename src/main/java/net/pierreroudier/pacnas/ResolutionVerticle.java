@@ -1,5 +1,11 @@
 package net.pierreroudier.pacnas;
 
+import io.vertx.core.AbstractVerticle;
+import io.vertx.core.AsyncResultHandler;
+import io.vertx.core.buffer.Buffer;
+import io.vertx.core.datagram.DatagramSocket;
+import io.vertx.core.datagram.DatagramSocketOptions;
+
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -8,16 +14,10 @@ import java.util.Vector;
 import net.pierreroudier.pacnas.store.InMemoryJavaHashmapStore;
 import net.pierreroudier.pacnas.store.Store;
 
-import org.vertx.java.core.AsyncResultHandler;
-import org.vertx.java.core.Handler;
-import org.vertx.java.core.buffer.Buffer;
-import org.vertx.java.core.datagram.DatagramSocket;
-import org.vertx.java.core.datagram.InternetProtocolFamily;
-import org.vertx.java.core.logging.Logger;
-import org.vertx.java.platform.Verticle;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.xbill.DNS.DClass;
 import org.xbill.DNS.Flags;
-import org.xbill.DNS.Message;
 import org.xbill.DNS.Name;
 import org.xbill.DNS.Opcode;
 import org.xbill.DNS.Rcode;
@@ -25,50 +25,55 @@ import org.xbill.DNS.Record;
 import org.xbill.DNS.Section;
 import org.xbill.DNS.Type;
 
-public class ResolutionVerticle extends Verticle {
-	public static String BUS_ADDRESS = "r";
+public class ResolutionVerticle extends AbstractVerticle {
+	public static final String BUS_ADDRESS = "r";
+	private static final int DNS_UDP_STD_PORT = 53;
 	private static int MAX_RECURSION_ALLOWED = 10;
 
-	private Logger logger;
+	private final Logger logger = LoggerFactory.getLogger(ResolutionVerticle.class);
 	private AsyncResultHandler<DatagramSocket> onSentToRemoteServer;
-	private Handler<org.vertx.java.core.eventbus.Message<byte[]>> myHandler;
 
 	private final StatsManager statsManager = new StatsManager();
 	private final Store store = new InMemoryJavaHashmapStore();
 
 	public void start() {
-		logger = container.logger();
-		logger.info("Starting ResolutionVerticle..");
+		logger.trace("Starting ResolutionVerticle");
 
 		onSentToRemoteServer = asyncResult -> {
 			if (asyncResult.failed()) {
 				logger.error("Error sending query to remote server", asyncResult.cause());
-				return;
+				// TODO try with next NS. If all fails, eventually response to
+				// the user with an error
 			}
 		};
 
-		myHandler = message -> onIncomingDataPacket(message);
-
-		vertx.eventBus().registerHandler(BUS_ADDRESS, myHandler);
+		vertx.eventBus().consumer(BUS_ADDRESS, message -> {
+			onIncomingDataPacket(message);
+		});
 	}
 
 	public void stop() {
-		logger.info("Closing ResolutionVerticle..");
-		vertx.eventBus().unregisterHandler(BUS_ADDRESS, myHandler);
+		logger.trace("Stopping ResolutionVerticle");
 	}
 
-	private void onIncomingDataPacket(org.vertx.java.core.eventbus.Message<byte[]> vertxBusMessage) {
-		logger.trace("Resolution request received via Vertx bus (msg hash=" + vertxBusMessage.hashCode() + ")");
+	protected void onIncomingDataPacket(final io.vertx.core.eventbus.Message<Object> vertxBusMessage) {
+		logger.trace("Resolution request received via Vertx bus (msg hash={})", vertxBusMessage.hashCode());
 		statsManager.increaseQueryReceived();
 
 		final ProcessingContext s = new ProcessingContext();
 
 		try {
 			// Interpret input data
+
 			s.vertxBusMessage = vertxBusMessage;
-			s.queryMessage = new Message(s.vertxBusMessage.body());
+			if (vertxBusMessage.body() instanceof byte[]) {
+				s.vertxBusMessageBody = (byte[]) vertxBusMessage.body();
+			} else {
+				throw new Exception("message bus wrong format");
+			}
+			s.queryMessage = new org.xbill.DNS.Message(s.vertxBusMessageBody);
 			s.queryRecord = s.queryMessage.getQuestion();
-			logger.trace("Request is: \"" + s.queryRecord.toString() + "\"");
+			logger.trace("Request is: \"{}\"", s.queryRecord.toString());
 
 			// Basic error check
 			if (s.queryMessage.getHeader().getFlag(Flags.QR) || s.queryMessage.getHeader().getRcode() != Rcode.NOERROR) {
@@ -76,11 +81,11 @@ public class ResolutionVerticle extends Verticle {
 				generateResponse(s, Rcode.FORMERR);
 			}
 			if (s.queryMessage.getHeader().getOpcode() != Opcode.QUERY) {
-				logger.info("Handling of the following opcode is not implemented: " + s.queryMessage.getHeader().getOpcode());
+				logger.info("Handling of the following opcode is not implemented: {}", s.queryMessage.getHeader().getOpcode());
 				generateResponse(s, Rcode.NOTIMP);
 			}
 			if (s.queryRecord.getDClass() != DClass.IN) {
-				logger.info("Handling of the following class is not implemented: " + s.queryRecord.getDClass());
+				logger.info("Handling of the following class is not implemented: {}", s.queryRecord.getDClass());
 				generateResponse(s, Rcode.NOTIMP);
 			}
 
@@ -91,23 +96,24 @@ public class ResolutionVerticle extends Verticle {
 				statsManager.increaseQueryAnsweredFromCache();
 				generateResponse(s, Rcode.NOERROR);
 			} else {
-				logger.trace("Not found in cache, starting recursive resolution..");
+				logger.trace("Not found in cache, starting recursive resolution");
 				statsManager.increaseQueryAnsweredByResolution();
 				s.saveAnswersToStore = true;
 				s.recursionCtx = new RecursionContext();
 
 				searchCacheForBestNameserver(s);
 
-				s.recursionCtx.socket = vertx.createDatagramSocket(InternetProtocolFamily.IPv4);
+				s.recursionCtx.socket = vertx.createDatagramSocket(new DatagramSocketOptions());
+
 				Record queryRecord = Record.newRecord(s.queryRecord.getName(), s.queryRecord.getType(), s.queryRecord.getDClass());
-				s.recursionCtx.queryMessage = Message.newQuery(queryRecord);
+				s.recursionCtx.queryMessage = org.xbill.DNS.Message.newQuery(queryRecord);
 				s.recursionCtx.queryMessage.getHeader().unsetFlag(Flags.RD);
 
 				foobar(s);
 
-				s.recursionCtx.socket.dataHandler(dataPacket -> {
+				s.recursionCtx.socket.handler(dataPacket -> {
 					try {
-						Message response = new Message(dataPacket.data().getBytes());
+						org.xbill.DNS.Message response = new org.xbill.DNS.Message(dataPacket.data().getBytes());
 
 						// Basic error check
 						if (s.recursionCtx.queryMessage.getHeader().getID() != response.getHeader().getID()) {
@@ -186,7 +192,8 @@ public class ResolutionVerticle extends Verticle {
 										logger.trace("Referral IP was not found in ADDITIONNAL section");
 									} else {
 										s.recursionCtx.currentNS = authNsIp;
-										// TODO handle multiplicity in logger.trace bellow
+										// TODO handle multiplicity in
+										// logger.trace bellow
 										logger.trace("Now using remove nameserver \"" + authorityName + "\" ("
 												+ s.recursionCtx.currentNS.get(0) + ")");
 										foobar(s);
@@ -201,46 +208,44 @@ public class ResolutionVerticle extends Verticle {
 								Record authorityRecord = response.getSectionArray(Section.AUTHORITY)[0];
 								Record authorityIpRecordQuery = Record.newRecord(authorityRecord.getAdditionalName(), Type.A,
 										authorityRecord.getDClass());
-								byte[] requestNsBytesArray = Message.newQuery(authorityIpRecordQuery).toWire(
+								byte[] requestNsBytesArray = org.xbill.DNS.Message.newQuery(authorityIpRecordQuery).toWire(
 										UdpListenerVerticle.DNS_UDP_MAXLENGTH);
 
-								vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, requestNsBytesArray,
-										new Handler<org.vertx.java.core.eventbus.Message<byte[]>>() {
-											public void handle(org.vertx.java.core.eventbus.Message<byte[]> m) {
-												try {
-													Message mmm = new Message(m.body());
-													Record[] records = mmm.getSectionArray(Section.ANSWER);
-													if (records.length > 0) {
-														// TODO handle multiplicity in logger.trace bellow
-														logger.trace("Resolved referral " + authorityRecord.getAdditionalName() + " to IP "
-																+ records[0].rdataToString());
-														s.recursionCtx.currentNS.clear();
-														for(Record r:records) {													
-															s.recursionCtx.currentNS.add(r.rdataToString());
-														}
-														Collections.shuffle(s.recursionCtx.currentNS);
-														foobar(s);
-													} else {
-														logger.trace("Found no IP for referral");
-														s.answerRS = null;
-														generateResponse(s, Rcode.NOERROR);
-													}
-												} catch (Exception e) {
-													logger.error("Oups", e);
-													s.answerRS = null;
-													generateResponse(s, Rcode.SERVFAIL);
-												}
-
-												if (s.responseReady) {
-													if (s.recursionCtx.socket != null) {
-														s.recursionCtx.socket.close();
-													}
-													logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-													s.vertxBusMessage.reply(s.response);
-												}
+								vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, requestNsBytesArray, busSendResult -> {
+									try {
+										org.xbill.DNS.Message mmm = new org.xbill.DNS.Message((byte[]) busSendResult.result().body());
+										Record[] records = mmm.getSectionArray(Section.ANSWER);
+										if (records.length > 0) {
+												// TODO handle
+												// multiplicity in
+												// logger.trace bellow
+											logger.trace("Resolved referral " + authorityRecord.getAdditionalName() + " to IP "
+													+ records[0].rdataToString());
+											s.recursionCtx.currentNS.clear();
+											for (Record r : records) {
+												s.recursionCtx.currentNS.add(r.rdataToString());
 											}
+											Collections.shuffle(s.recursionCtx.currentNS);
+											foobar(s);
+										} else {
+											logger.trace("Found no IP for referral");
+											s.answerRS = null;
+											generateResponse(s, Rcode.NOERROR);
+										}
+									} catch (Exception e) {
+										logger.error("Oups", e);
+										s.answerRS = null;
+										generateResponse(s, Rcode.SERVFAIL);
+									}
 
-										});
+									if (s.responseReady) {
+										if (s.recursionCtx.socket != null) {
+											s.recursionCtx.socket.close();
+										}
+										logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+										s.vertxBusMessage.reply(s.response);
+									}
+								});
 							}
 						} else {
 							logger.error("we\'re not supposed to be here");
@@ -285,17 +290,17 @@ public class ResolutionVerticle extends Verticle {
 
 	private void generateResponse(ProcessingContext s, int returnCodeToSet) {
 		if (s.responseReady == true) {
-			logger.fatal("Attempted to overwrite a response, but nothing was done. This is probably due to a faulty logic in the code.");
+			logger.error("Attempted to overwrite a response, but nothing was done. This is probably due to a faulty logic in the code.");
 		} else {
-			logger.trace("Preparing response..");
+			logger.trace("Preparing response");
 
 			if (s.returnCode != ProcessingContext.RETURN_CODE_INVALID_VALUE) {
-				logger.fatal("Return code was already set. It has not been changed but this is probably due to a faulty logic in the code.");
+				logger.error("Return code was already set. It has not been changed but this is probably due to a faulty logic in the code.");
 			} else {
 				s.returnCode = returnCodeToSet;
 			}
 
-			Message msg = new Message();
+			org.xbill.DNS.Message msg = new org.xbill.DNS.Message();
 			msg.getHeader().setRcode(s.returnCode);
 			msg.getHeader().setFlag(Flags.RA);
 			msg.getHeader().setFlag(Flags.QR);
@@ -334,8 +339,8 @@ public class ResolutionVerticle extends Verticle {
 		logger.trace("Sending question to remote nameserver " + s.recursionCtx.currentNS.get(0) + ": \""
 				+ s.recursionCtx.queryMessage.getQuestion() + "\"");
 
-		Buffer buffer = new Buffer(s.recursionCtx.queryMessage.toWire(UdpListenerVerticle.DNS_UDP_MAXLENGTH));
-		s.recursionCtx.socket.send(buffer, s.recursionCtx.currentNS.get(0), 53, onSentToRemoteServer);
+		Buffer buffer = Buffer.buffer(s.recursionCtx.queryMessage.toWire(UdpListenerVerticle.DNS_UDP_MAXLENGTH));
+		s.recursionCtx.socket.send(buffer, DNS_UDP_STD_PORT, s.recursionCtx.currentNS.get(0), onSentToRemoteServer);
 
 	}
 
@@ -366,7 +371,7 @@ public class ResolutionVerticle extends Verticle {
 				break;
 			}
 		}
-	
+
 		if (nameServerList.size() > 0) {
 			// Find IP of matching NS
 			for (String serverName : nameServerList) {
@@ -383,8 +388,8 @@ public class ResolutionVerticle extends Verticle {
 			s.recursionCtx.currentNS.add("192.33.4.12");
 			s.recursionCtx.currentNS.add("202.12.27.33");
 		}
-		
-		// Shuffle so as to even the load
-		 Collections.shuffle(s.recursionCtx.currentNS);
+
+		// Shuffle so as to even the load on remote servers
+		Collections.shuffle(s.recursionCtx.currentNS);
 	}
 }
