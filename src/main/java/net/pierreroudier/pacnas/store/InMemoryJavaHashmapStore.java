@@ -81,6 +81,10 @@ public class InMemoryJavaHashmapStore implements Store {
 		return output;
 	}
 
+	public void discardContent() {
+		entries.clear();
+	}
+	
 	protected int ComputeQueryHash(String queryName, int queryType, int queryClass) {
 		StringBuilder sb = new StringBuilder();
 		sb.append(queryName);
