@@ -3,9 +3,11 @@ package net.pierreroudier.pacnas;
 import io.vertx.core.AbstractVerticle;
 import io.vertx.core.AsyncResultHandler;
 import io.vertx.core.buffer.Buffer;
+import io.vertx.core.datagram.DatagramPacket;
 import io.vertx.core.datagram.DatagramSocket;
 import io.vertx.core.datagram.DatagramSocketOptions;
 
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -56,239 +58,221 @@ public class ResolutionVerticle extends AbstractVerticle {
 		logger.trace("Stopping ResolutionVerticle");
 	}
 
-	protected void onIncomingDataPacket(final io.vertx.core.eventbus.Message<Object> vertxBusMessage) {
+	private void onIncomingDataPacket(final io.vertx.core.eventbus.Message<Object> vertxBusMessage) {
 		logger.trace("Resolution request received via Vertx bus (msg hash={})", vertxBusMessage.hashCode());
 		statsManager.increaseQueryReceived();
 
 		final ProcessingContext s = new ProcessingContext();
 
 		try {
-			// Interpret input data
+			unmarshalBusMessage(vertxBusMessage, s);
+			incomingRequestBasicCheck(s);
 
-			s.vertxBusMessage = vertxBusMessage;
-			if (vertxBusMessage.body() instanceof byte[]) {
-				s.vertxBusMessageBody = (byte[]) vertxBusMessage.body();
-			} else {
-				throw new Exception("message bus wrong format");
-			}
-			s.queryMessage = new org.xbill.DNS.Message(s.vertxBusMessageBody);
-			s.queryRecord = s.queryMessage.getQuestion();
-			logger.trace("Request is: \"{}\"", s.queryRecord.toString());
-
-			// Basic error check
-			if (s.queryMessage.getHeader().getFlag(Flags.QR) || s.queryMessage.getHeader().getRcode() != Rcode.NOERROR) {
-				logger.info("Request has format error");
-				generateResponse(s, Rcode.FORMERR);
-			}
-			if (s.queryMessage.getHeader().getOpcode() != Opcode.QUERY) {
-				logger.info("Handling of the following opcode is not implemented: {}", s.queryMessage.getHeader().getOpcode());
-				generateResponse(s, Rcode.NOTIMP);
-			}
-			if (s.queryRecord.getDClass() != DClass.IN) {
-				logger.info("Handling of the following class is not implemented: {}", s.queryRecord.getDClass());
-				generateResponse(s, Rcode.NOTIMP);
-			}
-
-			// Query cache
-			s.answerRS = store.getRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(), s.queryRecord.getDClass());
+			// Lookup in cache
+			s.answerRS = store.getRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(),
+					s.incomingQueryRecord.getDClass());
 			if (s.answerRS != null) {
+				// From cache
 				logger.trace("Answering from cache");
 				statsManager.increaseQueryAnsweredFromCache();
 				generateResponse(s, Rcode.NOERROR);
 			} else {
+				// Not from cache
 				logger.trace("Not found in cache, starting recursive resolution");
-				statsManager.increaseQueryAnsweredByResolution();
-				s.saveAnswersToStore = true;
-				s.recursionCtx = new RecursionContext();
-
-				searchCacheForBestNameserver(s);
-
-				s.recursionCtx.socket = vertx.createDatagramSocket(new DatagramSocketOptions());
-
-				Record queryRecord = Record.newRecord(s.queryRecord.getName(), s.queryRecord.getType(), s.queryRecord.getDClass());
-				s.recursionCtx.queryMessage = org.xbill.DNS.Message.newQuery(queryRecord);
-				s.recursionCtx.queryMessage.getHeader().unsetFlag(Flags.RD);
-
-				foobar(s);
-
+				prepareRecursion(s);
+				sendToRemoteServer(s);
 				s.recursionCtx.socket.handler(dataPacket -> {
-					try {
-						org.xbill.DNS.Message response = new org.xbill.DNS.Message(dataPacket.data().getBytes());
+					// ==ASYNC ======================================================================
+					// Response from remote server
+						try {
+							unmarshalRemoteServerResponse(dataPacket, s);
+							org.xbill.DNS.Message response = s.recursionCtx.remoteServerResponse;
+							remoteServerResponseCheck(s, response);
 
-						// Basic error check
-						if (s.recursionCtx.queryMessage.getHeader().getID() != response.getHeader().getID()) {
-							logger.info("ID mismatch, remote server is broken");
-							generateResponse(s, Rcode.NOERROR);
-						}
-						if (response.getRcode() != response.getHeader().getRcode()) {
-							logger.info("response.getRcode() != response.getHeader().getRcode()");
-							generateResponse(s, Rcode.NOERROR);
-						}
-
-						logger.trace("Received " + response.getSectionArray(Section.QUESTION).length + " question, "
-								+ response.getSectionArray(Section.ANSWER).length + " answer, "
-								+ response.getSectionArray(Section.AUTHORITY).length + " authority, "
-								+ response.getSectionArray(Section.ADDITIONAL).length + " additional. Rcode="
-								+ Rcode.string(response.getRcode()));
-
-						switch (response.getRcode()) {
-						case Rcode.NXDOMAIN:
-							s.answerRS = null;
-							generateResponse(s, Rcode.NXDOMAIN);
-							break;
-						case Rcode.REFUSED:
-							s.answerRS = null;
-							generateResponse(s, Rcode.REFUSED);
-							break;
-						case Rcode.SERVFAIL:
-							s.answerRS = null;
-							generateResponse(s, Rcode.NOERROR);
-							break;
-						case Rcode.NOERROR:
-							if (response.getHeader().getFlag(Flags.AA)) {
-								// Authoritative answer
-								if (response.getSectionArray(Section.ANSWER).length > 0) {
-									logger.trace("Got authoritative answer with ANSWER records");
-								} else {
-									logger.trace("Got empty authoritative answer");
-								}
-								s.answerRS = response.getSectionArray(Section.ANSWER);
+							switch (response.getRcode()) {
+							case Rcode.NXDOMAIN:
+								s.answerRS = null;
+								generateResponse(s, Rcode.NXDOMAIN);
+								break;
+							case Rcode.REFUSED:
+								s.answerRS = null;
+								generateResponse(s, Rcode.REFUSED);
+								break;
+							case Rcode.SERVFAIL:
+								s.answerRS = null;
 								generateResponse(s, Rcode.NOERROR);
-								if (s.saveAnswersToStore) {
-									logger.trace("Saving to store");
-									store.putRecords(s.queryRecord.getName().toString(), s.queryRecord.getType(),
-											s.queryRecord.getDClass(), s.answerRS);
+								break;
+							case Rcode.NOERROR:
+								if (response.getHeader().getFlag(Flags.AA)) {
+									onAuthoritativeResponse(s, response);
+								} else {
+									onNonAuthoritativeResponse(s, response);
 								}
-							} else {
-								// Non Authoritative answer
-						if (response.getSectionArray(Section.ANSWER).length == 0 && response.getSectionArray(Section.AUTHORITY).length > 0) {
-							logger.trace("Response is a redirection to referral");
+								break;
 
-							if (response.getSectionArray(Section.ADDITIONAL).length > 0) {
-								for (Record authorityRecord : response.getSectionArray(Section.AUTHORITY)) {
-									if (authorityRecord.getType() != Type.NS) {
-										logger.warn("ignored authority record because type!=NS");
-										continue;
-									}
-
-									String authorityName = authorityRecord.rdataToString();
-									logger.trace("Looking for the following referral's IP in ADDITIONAL section: \"" + authorityName + "\"");
-
-									List<String> authNsIp = new ArrayList<String>();
-									for (Record additionnalRecord : response.getSectionArray(Section.ADDITIONAL)) {
-										if (additionnalRecord.getName().toString().equals(authorityName)) {
-											String ss = additionnalRecord.rdataToString();
-											logger.trace("Found referral's IP: \"" + ss + "\"");
-											if (ss.indexOf(':') == -1) {
-												// ipv4
-												authNsIp.add(ss);
-											} else {
-												// ipv6
-												logger.trace("IPv6 address discarded");
-											}
-										}
-									}
-									if (authNsIp.size() == 0) {
-										logger.trace("Referral IP was not found in ADDITIONNAL section");
-									} else {
-										s.recursionCtx.currentNS = authNsIp;
-										// TODO handle multiplicity in
-										// logger.trace bellow
-										logger.trace("Now using remove nameserver \"" + authorityName + "\" ("
-												+ s.recursionCtx.currentNS.get(0) + ")");
-										foobar(s);
-									}
-									break;
-								}
-							} else {
-								String server = response.getSectionArray(Section.AUTHORITY)[0].getAdditionalName().toString();
-								logger.trace("Referral is \"" + server + "\" but no ADDITIONNAL section provided, starting resolution.. ");
-
-								// Gotta find the authoritative server's IP
-								Record authorityRecord = response.getSectionArray(Section.AUTHORITY)[0];
-								Record authorityIpRecordQuery = Record.newRecord(authorityRecord.getAdditionalName(), Type.A,
-										authorityRecord.getDClass());
-								byte[] requestNsBytesArray = org.xbill.DNS.Message.newQuery(authorityIpRecordQuery).toWire(
-										UdpListenerVerticle.DNS_UDP_MAXLENGTH);
-
-								vertx.eventBus().send(ResolutionVerticle.BUS_ADDRESS, requestNsBytesArray, busSendResult -> {
-									try {
-										org.xbill.DNS.Message mmm = new org.xbill.DNS.Message((byte[]) busSendResult.result().body());
-										Record[] records = mmm.getSectionArray(Section.ANSWER);
-										if (records.length > 0) {
-												// TODO handle
-												// multiplicity in
-												// logger.trace bellow
-											logger.trace("Resolved referral " + authorityRecord.getAdditionalName() + " to IP "
-													+ records[0].rdataToString());
-											s.recursionCtx.currentNS.clear();
-											for (Record r : records) {
-												s.recursionCtx.currentNS.add(r.rdataToString());
-											}
-											Collections.shuffle(s.recursionCtx.currentNS);
-											foobar(s);
-										} else {
-											logger.trace("Found no IP for referral");
-											s.answerRS = null;
-											generateResponse(s, Rcode.NOERROR);
-										}
-									} catch (Exception e) {
-										logger.error("Oups", e);
-										s.answerRS = null;
-										generateResponse(s, Rcode.SERVFAIL);
-									}
-
-									if (s.responseReady) {
-										if (s.recursionCtx.socket != null) {
-											s.recursionCtx.socket.close();
-										}
-										logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-										s.vertxBusMessage.reply(s.response);
-									}
-								});
+							default:
+								throw new Exception("Pacnas does not know what to do (yet) out of this return code: "
+										+ Rcode.string(response.getRcode()));
 							}
-						} else {
-							logger.error("we\'re not supposed to be here");
+						} catch (RemoteServerResponseException e) {
+							logger.trace(e.getMessage());
+							s.answerRS = null;
+							generateResponse(s, e.getOutcomeReturnCode());
+						} catch (Exception e) {
+							logger.error("Oups", e);
+							s.answerRS = null;
+							generateResponse(s, Rcode.SERVFAIL);
+						} finally {
+							possiblyConclude(s);
 						}
-					}
-							break;
-
-						default:
-							throw new Exception("Pacnas does not know what to do (yet) out of this return code: "
-									+ Rcode.string(response.getRcode()));
-						}
-					} catch (Exception e) {
-						logger.error("Oups", e);
-						s.answerRS = null;
-						generateResponse(s, Rcode.SERVFAIL);
-					}
-
-					if (s.responseReady) {
-						if (s.recursionCtx.socket != null) {
-							s.recursionCtx.socket.close();
-						}
-						logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-						s.vertxBusMessage.reply(s.response);
-					}
-				});
+						// ==ASYNC ======================================================================
+					});
 			}
-
-		} catch (org.xbill.DNS.WireParseException e) {
+		} catch (IncomingRequestException e) {
+			logger.trace(e.getMessage());
 			s.answerRS = null;
-			generateResponse(s, Rcode.FORMERR);
+			generateResponse(s, e.getOutcomeReturnCode());
 		} catch (Exception e) {
 			logger.error("Oups", e);
 			s.answerRS = null;
 			generateResponse(s, Rcode.SERVFAIL);
-		}
-
-		if (s.responseReady) {
-			logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-			s.vertxBusMessage.reply(s.response);
+		} finally {
+			possiblyConclude(s);
 		}
 	}
 
-	private void generateResponse(ProcessingContext s, int returnCodeToSet) {
+	private void onNonAuthoritativeResponse(final ProcessingContext s, org.xbill.DNS.Message response) throws Exception {
+		if (response.getSectionArray(Section.ANSWER).length > 0) {
+			logger.trace("Answer from non-authoritative server will be discarded");
+		}
+
+		if (response.getSectionArray(Section.AUTHORITY).length > 0) {
+			logger.trace("Populating RecursionContext's nameserver list from AUTHORITY section");
+
+			s.recursionCtx.nameserversToUse.clear();
+			for (Record authorityRecord : response.getSectionArray(Section.AUTHORITY)) {
+				if (authorityRecord.getType() != Type.NS) {
+					logger.info("Ignored authority record because type is not NS");
+					continue;
+				}
+
+				String authoritativeServerName = authorityRecord.rdataToString();
+				RecursionContext.NameserverCoordinate nc = new RecursionContext.NameserverCoordinate(authoritativeServerName);
+
+				if (response.getSectionArray(Section.ADDITIONAL).length > 0) {
+					// Lookup in ADDITIONAL section for potential IP address sent by remote server
+					logger.trace("Looking for the following server's address in ADDITIONAL section: \"{}\"", authoritativeServerName);
+
+					// TODO this is overly complicated for now, as we only support one IP per remoteserver name.
+					List<String> authNsIp = new ArrayList<String>();
+					for (Record additionnalRecord : response.getSectionArray(Section.ADDITIONAL)) {
+						if (additionnalRecord.getName().toString().equals(authoritativeServerName)) {
+							String ss = additionnalRecord.rdataToString();
+							logger.trace("Found referral's IP: \"{}\"", ss);
+							if (ss.indexOf(':') == -1) {
+								// ipv4
+								authNsIp.add(ss);
+							} else {
+								// ipv6
+								logger.trace("IPv6 address discarded");
+							}
+						}
+					}
+					if (authNsIp.size() > 0) {
+						nc.setIp(authNsIp.get(0));
+					} else {
+						logger.trace("Referral IP was not found in ADDITIONNAL section for server {}", authoritativeServerName);
+					}
+				}
+
+				s.recursionCtx.nameserversToUse.add(nc);
+				logger.trace("Added new remote nameserver to recursion context: {}", nc);
+			}
+			
+			sendToRemoteServer(s);
+		} else {
+			logger.warn("Got a non-authoritative response without any authority servers therefore initial request will NOT be answered");
+		}
+	}
+
+	private void onAuthoritativeResponse(final ProcessingContext s, org.xbill.DNS.Message response) {
+		if (response.getSectionArray(Section.ANSWER).length > 0) {
+			logger.trace("Got authoritative response with ANSWER records");
+		} else {
+			logger.trace("Got empty authoritative answer");
+		}
+		s.answerRS = response.getSectionArray(Section.ANSWER);
+		generateResponse(s, Rcode.NOERROR);
+		if (s.saveAnswersToStore) {
+			logger.trace("Saving to store");
+			store.putRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(),
+					s.incomingQueryRecord.getDClass(), s.answerRS);
+		}
+	}
+
+	private void remoteServerResponseCheck(final ProcessingContext s, org.xbill.DNS.Message response)
+			throws RemoteServerResponseException {
+		if (s.recursionCtx.remoteServerQueryMessage.getHeader().getID() != response.getHeader().getID()) {
+			throw new RemoteServerResponseException("ID mismatch, remote server is broken", Rcode.NOERROR);
+		}
+		if (response.getRcode() != response.getHeader().getRcode()) {
+			throw new RemoteServerResponseException("response.getRcode() != response.getHeader().getRcode()", Rcode.NOERROR);
+		}
+
+		if (logger.isTraceEnabled()) {
+			StringBuilder sb = new StringBuilder();
+			sb.append("Received response with ");
+			sb.append(response.getSectionArray(Section.QUESTION).length);
+			sb.append(" question, ");
+			sb.append(response.getSectionArray(Section.ANSWER).length);
+			sb.append(" answer, ");
+			sb.append(response.getSectionArray(Section.AUTHORITY).length);
+			sb.append(" authority, ");
+			sb.append(response.getSectionArray(Section.ADDITIONAL).length);
+			sb.append(" additional. Rcode=");
+			sb.append(Rcode.string(response.getRcode()));
+			logger.trace(sb.toString());
+		}
+	}
+
+	private void unmarshalBusMessage(final io.vertx.core.eventbus.Message<Object> vertxBusMessage, final ProcessingContext s)
+			throws IncomingRequestException, IOException  {
+		s.vertxBusMessage = vertxBusMessage;
+		s.vertxBusMessageBody = (byte[]) vertxBusMessage.body();
+		try {
+			s.queryMessage = new org.xbill.DNS.Message(s.vertxBusMessageBody);
+		} catch (org.xbill.DNS.WireParseException e) {
+			throw new IncomingRequestException("Incoming request has format error", Rcode.FORMERR);
+		}
+
+		s.incomingQueryRecord = s.queryMessage.getQuestion();
+		logger.trace("Request is: \"{}\"", s.incomingQueryRecord.toString());
+	}
+
+	private void unmarshalRemoteServerResponse(final DatagramPacket dataPacket, final ProcessingContext s)
+			throws RemoteServerResponseException, IOException {
+		try {
+			s.recursionCtx.remoteServerResponse = new org.xbill.DNS.Message(dataPacket.data().getBytes());
+		} catch (org.xbill.DNS.WireParseException e) {
+			throw new RemoteServerResponseException("Response from remote server has format error", Rcode.NOERROR);
+		}
+	}
+
+	private void incomingRequestBasicCheck(final ProcessingContext s) throws IncomingRequestException {
+		if (s.queryMessage.getHeader().getFlag(Flags.QR) || s.queryMessage.getHeader().getRcode() != Rcode.NOERROR) {
+			throw new IncomingRequestException("Incoming request has format error", Rcode.FORMERR);
+		}
+		if (s.queryMessage.getHeader().getOpcode() != Opcode.QUERY) {
+			throw new IncomingRequestException("The following opcode is not supported by Pacnas: "
+					+ s.queryMessage.getHeader().getOpcode(), Rcode.NOTIMP);
+		}
+		if (s.incomingQueryRecord.getDClass() != DClass.IN) {
+			throw new IncomingRequestException("The following class is not supported by Pacnas: "
+					+ s.incomingQueryRecord.getDClass(), Rcode.NOTIMP);
+		}
+	}
+
+	private void generateResponse(final ProcessingContext s, int returnCodeToSet) {
 		if (s.responseReady == true) {
 			logger.error("Attempted to overwrite a response, but nothing was done. This is probably due to a faulty logic in the code.");
 		} else {
@@ -311,8 +295,8 @@ public class ResolutionVerticle extends AbstractVerticle {
 				}
 				msg.getHeader().setID(s.queryMessage.getHeader().getID());
 			}
-			if (s.queryRecord != null) {
-				msg.addRecord(s.queryRecord, Section.QUESTION);
+			if (s.incomingQueryRecord != null) {
+				msg.addRecord(s.incomingQueryRecord, Section.QUESTION);
 			}
 
 			if (s.answerRS != null && s.answerRS.length > 0) {
@@ -329,33 +313,63 @@ public class ResolutionVerticle extends AbstractVerticle {
 		}
 	}
 
-	private void foobar(ProcessingContext s) throws Exception {
+	private void possiblyConclude(final ProcessingContext s) {
+		if (s.responseReady) {
+			logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+			s.vertxBusMessage.reply(s.response);
+			if (s.recursionCtx != null && s.recursionCtx.socket != null) {
+				s.recursionCtx.socket.close();
+			}
+		}
+	}
+
+	private void prepareRecursion(final ProcessingContext s) throws Exception {
+		statsManager.increaseQueryAnsweredByResolution();
+		s.saveAnswersToStore = true;
+		s.recursionCtx = new RecursionContext();
+		s.recursionCtx.socket = vertx.createDatagramSocket(new DatagramSocketOptions());
+		Record remoteServerQueryRecord = Record.newRecord(s.incomingQueryRecord.getName(), s.incomingQueryRecord.getType(),
+				s.incomingQueryRecord.getDClass());
+		s.recursionCtx.remoteServerQueryMessage = org.xbill.DNS.Message.newQuery(remoteServerQueryRecord);
+		s.recursionCtx.remoteServerQueryMessage.getHeader().unsetFlag(Flags.RD);
+		searchCacheForBestNameserver(s);
+	}
+
+	private void sendToRemoteServer(final ProcessingContext s) throws Exception {
 		if (s.recursionCtx.infiniteLoopProtection == MAX_RECURSION_ALLOWED) {
 			throw new Exception("Maximum recursion limit reached");
 		} else {
 			s.recursionCtx.infiniteLoopProtection++;
 		}
+		
+		// Shuffle so as to even the load on remote servers
+		Collections.shuffle(s.recursionCtx.nameserversToUse);
+		
+		RecursionContext.NameserverCoordinate nc = s.recursionCtx.nameserversToUse.get(0);
+		if (nc.getIp() == null) {
+			//resolve(s);
+			throw new Exception("plouf");
+		}
 
-		logger.trace("Sending question to remote nameserver " + s.recursionCtx.currentNS.get(0) + ": \""
-				+ s.recursionCtx.queryMessage.getQuestion() + "\"");
+		logger.trace("Sending question to remote nameserver {}: {}", nc.toString(),
+				s.recursionCtx.remoteServerQueryMessage.getQuestion());
 
-		Buffer buffer = Buffer.buffer(s.recursionCtx.queryMessage.toWire(UdpListenerVerticle.DNS_UDP_MAXLENGTH));
-		s.recursionCtx.socket.send(buffer, DNS_UDP_STD_PORT, s.recursionCtx.currentNS.get(0), onSentToRemoteServer);
+		Buffer buffer = Buffer.buffer(s.recursionCtx.remoteServerQueryMessage.toWire(UdpListenerVerticle.DNS_UDP_MAXLENGTH));
+		s.recursionCtx.socket.send(buffer, DNS_UDP_STD_PORT, nc.getIp(), onSentToRemoteServer);
 
 	}
 
 	/**
-	 * Look up in the cache if we already know some NS best suited to respond to
-	 * this query
+	 * Look up in the cache if we already know some NS best suited to respond to this query
 	 * 
 	 * @param s
 	 *            ProcessingContext
 	 * @throws Exception
 	 */
-	private void searchCacheForBestNameserver(ProcessingContext s) throws Exception {
+	private void searchCacheForBestNameserver(final ProcessingContext s) throws Exception {
 		// Find matching NS RR
 		List<String> nameServerList = new Vector<String>();
-		Name queryRecordName = s.queryRecord.getName();
+		Name queryRecordName = s.incomingQueryRecord.getName();
 		for (int i = 0; i < queryRecordName.labels(); i++) {
 			StringBuilder sb = new StringBuilder();
 			for (int j = i; j < queryRecordName.labels(); j++) {
@@ -363,7 +377,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 				sb.append(".");
 			}
 			String domainName = sb.toString();
-			Record[] records = store.getRecords(domainName, Type.NS, s.queryRecord.getDClass());
+			Record[] records = store.getRecords(domainName, Type.NS, s.incomingQueryRecord.getDClass());
 			if (records != null) {
 				for (Record r : records) {
 					nameServerList.add(r.getName().toString());
@@ -375,21 +389,64 @@ public class ResolutionVerticle extends AbstractVerticle {
 		if (nameServerList.size() > 0) {
 			// Find IP of matching NS
 			for (String serverName : nameServerList) {
-				Record[] records = store.getRecords(serverName, Type.A, s.queryRecord.getDClass());
+				Record[] records = store.getRecords(serverName, Type.A, s.incomingQueryRecord.getDClass());
 				for (Record r : records) {
-					s.recursionCtx.currentNS.add(r.rdataToString());
+					// TODO do the real stuff
+					// s.recursionCtx.nameserversToUse.add(r.rdataToString());
 				}
 			}
 		} else {
-			// If no matching NS were found above, use root-servers
-			s.recursionCtx.currentNS.add("192.36.148.17");
-			s.recursionCtx.currentNS.add("192.58.128.30");
-			s.recursionCtx.currentNS.add("199.7.83.42");
-			s.recursionCtx.currentNS.add("192.33.4.12");
-			s.recursionCtx.currentNS.add("202.12.27.33");
+			// If no matching NS were found above, use the root-servers
+			s.recursionCtx.nameserversToUse.add(new RecursionContext.NameserverCoordinate("i.root-servers.net", "192.36.148.17"));
+			s.recursionCtx.nameserversToUse.add(new RecursionContext.NameserverCoordinate("j.root-servers.net", "192.58.128.30"));
+			s.recursionCtx.nameserversToUse.add(new RecursionContext.NameserverCoordinate("l.root-servers.net", "199.7.83.42"));
+			s.recursionCtx.nameserversToUse.add(new RecursionContext.NameserverCoordinate("c.root-servers.net", "192.33.4.12"));
 		}
-
-		// Shuffle so as to even the load on remote servers
-		Collections.shuffle(s.recursionCtx.currentNS);
 	}
+
+	/*
+	private void resolve(final ProcessingContext s) {
+		Record authorityRecord = response.getSectionArray(Section.AUTHORITY)[0];
+		Record authorityIpRecordQuery = Record
+				.newRecord(authorityRecord.getAdditionalName(), Type.A, authorityRecord.getDClass());
+		byte[] requestNsBytesArray = org.xbill.DNS.Message.newQuery(authorityIpRecordQuery).toWire(
+				UdpListenerVerticle.DNS_UDP_MAXLENGTH);
+
+		vertx.eventBus()
+				.send(ResolutionVerticle.BUS_ADDRESS, requestNsBytesArray, busSendResult -> {
+					try {
+						org.xbill.DNS.Message mmm = new org.xbill.DNS.Message((byte[]) busSendResult.result().body());
+						Record[] records = mmm.getSectionArray(Section.ANSWER);
+						if (records.length > 0) {
+							// TODO handle
+							// multiplicity in
+							// logger.trace bellow
+						logger.trace("Resolved referral " + authorityRecord.getAdditionalName() + " to IP "
+								+ records[0].rdataToString());
+						s.recursionCtx.nameserversToUse.clear();
+						for (Record r : records) {
+							s.recursionCtx.nameserversToUse.add(r.rdataToString());
+						}
+						Collections.shuffle(s.recursionCtx.nameserversToUse);
+						sendToRemoteServer(s);
+					} else {
+						logger.trace("Found no IP for referral");
+						s.answerRS = null;
+						generateResponse(s, Rcode.NOERROR);
+					}
+				} catch (Exception e) {
+					logger.error("Oups", e);
+					s.answerRS = null;
+					generateResponse(s, Rcode.SERVFAIL);
+				}
+
+				if (s.responseReady) {
+					if (s.recursionCtx.socket != null) {
+						s.recursionCtx.socket.close();
+					}
+					logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+					s.vertxBusMessage.reply(s.response);
+				}
+			}	);
+	}*/
 }

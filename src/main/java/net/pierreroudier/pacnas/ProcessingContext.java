@@ -10,7 +10,7 @@ public class ProcessingContext {
 	public byte[] vertxBusMessageBody;
 
 	public Message queryMessage = null;
-	public Record queryRecord = null;
+	public Record incomingQueryRecord = null;
 
 	public int returnCode = RETURN_CODE_INVALID_VALUE;
 	public Record[] answerRS = null;
