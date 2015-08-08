@@ -17,7 +17,7 @@
 		<!--Vertx module name -->
 		<module.name>${project.groupId}~${project.artifactId}~${project.version}</module.name>
 		<!-- the main verticle class name -->
-		<main.verticle>net.pierreroudier.pacnas.MainVerticle</main.verticle>
+		<main.verticle>net.pierreroudier.pacnas.BootstrapVerticle</main.verticle>
 
 		<!--Dependency versions -->
 		<vertx.version>3.0.0</vertx.version>
@@ -45,6 +45,11 @@
 		<dependency>
 			<groupId>io.vertx</groupId>
 			<artifactId>vertx-core</artifactId>
+			<version>${vertx.version}</version>
+		</dependency>
+		<dependency>
+			<groupId>io.vertx</groupId>
+			<artifactId>vertx-hazelcast</artifactId>
 			<version>${vertx.version}</version>
 		</dependency>
 		<!-- <dependency> <groupId>junit</groupId> <artifactId>junit</artifactId> 
