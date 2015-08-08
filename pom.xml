@@ -42,18 +42,15 @@
 	</properties>
 
 	<dependencies>
-		<!--Vertx provided dependencies -->
 		<dependency>
 			<groupId>io.vertx</groupId>
 			<artifactId>vertx-core</artifactId>
 			<version>${vertx.version}</version>
 		</dependency>
-		<!--Test dependencies -->
 		<!-- <dependency> <groupId>junit</groupId> <artifactId>junit</artifactId> 
 			<version>${junit.version}</version> <scope>test</scope> </dependency> <dependency> 
 			<groupId>io.vertx</groupId> <artifactId>testtools</artifactId> <version>${vertx.testtools.version}</version> 
 			<scope>test</scope> </dependency> -->
-		<!--Project's dependencies -->
 		<dependency>
 			<groupId>dnsjava</groupId>
 			<artifactId>dnsjava</artifactId>
@@ -74,6 +71,8 @@
 			<artifactId>javassist</artifactId>
 			<version>${javassist.version}</version>
 		</dependency>
+		<!-- <dependency> <groupId>org.apache.commons</groupId> <artifactId>commons-configuration2</artifactId> 
+			<version>2.0</version> </dependency> -->
 		<dependency>
 			<groupId>org.testng</groupId>
 			<artifactId>testng</artifactId>
@@ -153,11 +152,5 @@
 
 		</plugins>
 	</build>
-
-	<!-- <reporting> <plugins> <plugin> <groupId>org.apache.maven.plugins</groupId> 
-		<artifactId>maven-surefire-report-plugin</artifactId> <version>${maven.surefire.report.plugin.version}</version> 
-		</plugin> <plugin> <groupId>org.apache.maven.plugins</groupId> <artifactId>maven-javadoc-plugin</artifactId> 
-		<version>${maven.javadoc.plugin.version}</version> <configuration> <aggregate>true</aggregate> 
-		</configuration> </plugin> </plugins> </reporting> -->
 
 </project>
