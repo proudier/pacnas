@@ -10,19 +10,17 @@ public interface Store {
 	 * 
 	 * @param queryName
 	 * @param queryType
-	 * @param queryClass
 	 * @return Null if no matching records are found in the store
 	 */
-	public Record[] getRecords(String queryName, int queryType, int queryClass);
+	public Record[] getRecords(String queryName, int queryType);
 	
 	/**
 	 * 
 	 * @param queryName
 	 * @param queryType
-	 * @param queryClass
 	 * @param records
 	 */
-	public void putRecords(String queryName, int queryType, int queryClass, Record[] records);
+	public void putRecords(String queryName, int queryType, Record[] records);
 	
 	/**
 	 * Drop all the records from the store; mainly for testing purposes
