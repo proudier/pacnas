@@ -12,7 +12,7 @@ public class BootstrapVerticle extends AbstractVerticle {
 	public void start() {
 		logger.trace("Starting BootstrapVerticle");
 
-		DeploymentOptions rvOptions = new DeploymentOptions().setInstances(8);
+		DeploymentOptions rvOptions = new DeploymentOptions().setInstances(2);
 		vertx.deployVerticle("net.pierreroudier.pacnas.ResolutionVerticle", rvOptions, rvResult -> {
 			if (rvResult.succeeded()) {
 				logger.trace("ResolutionVerticle deployment id is: {}", rvResult.result());
