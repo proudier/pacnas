@@ -22,13 +22,13 @@ public class BootstrapVerticle extends AbstractVerticle {
 					if (ulvResult.succeeded()) {
 						logger.trace("UdpListenerVerticle deployment id is: {}", ulvResult.result());
 					} else {
-						logger.error("UdpListenerVerticle deployment failed; exiting");
+						logger.error("UdpListenerVerticle deployment failed; abording", ulvResult.cause());
 						vertx.close();
 					}
 				});
 
 			} else {
-				logger.error("ResolutionVerticle deployment failed; exiting");
+				logger.error("ResolutionVerticle deployment failed; abording", rvResult.cause());
 				vertx.close();
 			}
 		});
