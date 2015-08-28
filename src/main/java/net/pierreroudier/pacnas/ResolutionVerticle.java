@@ -13,7 +13,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Vector;
 
-import net.pierreroudier.pacnas.store.InMemoryJavaHashmapStore;
+import net.pierreroudier.pacnas.store.RedisStore;
 import net.pierreroudier.pacnas.store.Store;
 
 import org.slf4j.Logger;
@@ -35,12 +35,15 @@ public class ResolutionVerticle extends AbstractVerticle {
 	private final Logger logger = LoggerFactory.getLogger(ResolutionVerticle.class);
 	private AsyncResultHandler<DatagramSocket> onSentToRemoteServer;
 
-	private final StatsManager statsManager = new StatsManager();
-	private final Store store = new InMemoryJavaHashmapStore();
+	private static final StatsManager statsManager = new StatsManager();
+	//	private final Store store = new InMemoryJavaHashmapStore();
+	private Store store;
 
 	public void start() {
 		logger.trace("Starting ResolutionVerticle");
 
+		store = new RedisStore(vertx);
+		
 		onSentToRemoteServer = asyncResult -> {
 			if (asyncResult.failed()) {
 				logger.error("Error sending query to remote server", asyncResult.cause());
@@ -69,8 +72,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 			incomingRequestBasicCheck(s);
 
 			// Lookup in cache
-			s.answerRS = store.getRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(),
-					s.incomingQueryRecord.getDClass());
+			s.answerRS = store.getRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType());
 			if (s.answerRS != null) {
 				// From cache
 				logger.trace("Answering from cache");
@@ -161,7 +163,8 @@ public class ResolutionVerticle extends AbstractVerticle {
 
 				if (response.getSectionArray(Section.ADDITIONAL).length > 0) {
 					// Lookup in ADDITIONAL section for potential IP address sent by remote server
-					logger.trace("Looking for the following server's address in ADDITIONAL section: \"{}\"", authoritativeServerName);
+					logger.trace("Looking for the following server's address in ADDITIONAL section: \"{}\"",
+							authoritativeServerName);
 
 					// TODO this is overly complicated for now, as we only support one IP per remoteserver name.
 					List<String> authNsIp = new ArrayList<String>();
@@ -188,7 +191,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 				s.recursionCtx.nameserversToUse.add(nc);
 				logger.trace("Added new remote nameserver to recursion context: {}", nc);
 			}
-			
+
 			sendToRemoteServer(s);
 		} else {
 			logger.warn("Got a non-authoritative response without any authority servers therefore initial request will NOT be answered");
@@ -205,8 +208,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 		generateResponse(s, Rcode.NOERROR);
 		if (s.saveAnswersToStore) {
 			logger.trace("Saving to store");
-			store.putRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(),
-					s.incomingQueryRecord.getDClass(), s.answerRS);
+			store.putRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(), s.answerRS);
 		}
 	}
 
@@ -236,7 +238,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 	}
 
 	private void unmarshalBusMessage(final io.vertx.core.eventbus.Message<Object> vertxBusMessage, final ProcessingContext s)
-			throws IncomingRequestException, IOException  {
+			throws IncomingRequestException, IOException {
 		s.vertxBusMessage = vertxBusMessage;
 		s.vertxBusMessageBody = (byte[]) vertxBusMessage.body();
 		try {
@@ -341,10 +343,10 @@ public class ResolutionVerticle extends AbstractVerticle {
 		} else {
 			s.recursionCtx.infiniteLoopProtection++;
 		}
-		
+
 		// Shuffle so as to even the load on remote servers
 		Collections.shuffle(s.recursionCtx.nameserversToUse);
-		
+
 		RecursionContext.NameserverCoordinate nc = s.recursionCtx.nameserversToUse.get(0);
 		if (nc.getIp() == null) {
 			//resolve(s);
@@ -377,7 +379,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 				sb.append(".");
 			}
 			String domainName = sb.toString();
-			Record[] records = store.getRecords(domainName, Type.NS, s.incomingQueryRecord.getDClass());
+			Record[] records = store.getRecords(domainName, Type.NS);
 			if (records != null) {
 				for (Record r : records) {
 					nameServerList.add(r.getName().toString());
@@ -389,7 +391,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 		if (nameServerList.size() > 0) {
 			// Find IP of matching NS
 			for (String serverName : nameServerList) {
-				Record[] records = store.getRecords(serverName, Type.A, s.incomingQueryRecord.getDClass());
+				Record[] records = store.getRecords(serverName, Type.A);
 				for (Record r : records) {
 					// TODO do the real stuff
 					// s.recursionCtx.nameserversToUse.add(r.rdataToString());

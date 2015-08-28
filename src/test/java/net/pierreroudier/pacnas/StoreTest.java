@@ -29,9 +29,9 @@ public class StoreTest {
 		records[0] = r1;
 
 		Store store = new InMemoryJavaHashmapStore();
-		store.putRecords(queryNameAsString, queryType, queryClass, records);
+		store.putRecords(queryNameAsString, queryType, records);
 
-		Record[] recordsFromStore = store.getRecords(queryNameAsString, queryType, queryClass);
+		Record[] recordsFromStore = store.getRecords(queryNameAsString, queryType);
 		Assert.assertNotNull(recordsFromStore, "The store return records");
 		Assert.assertEquals(recordsFromStore.length, 1);
 		Assert.assertEquals(recordsFromStore[0].getName(), queryNameAsDnsjavaName);
@@ -55,10 +55,10 @@ public class StoreTest {
 		records[0] = r1;
 
 		Store store = new InMemoryJavaHashmapStore();
-		store.putRecords(queryNameAsString, queryType, queryClass, records);
+		store.putRecords(queryNameAsString, queryType, records);
 		store.discardContent();
 
-		Record[] recordsFromStore = store.getRecords(queryNameAsString, queryType, queryClass);
+		Record[] recordsFromStore = store.getRecords(queryNameAsString, queryType);
 		Assert.assertNull(recordsFromStore, "The store not return records because it should be emtpy");
 	}
 }
