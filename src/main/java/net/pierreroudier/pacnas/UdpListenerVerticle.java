@@ -23,6 +23,15 @@ public class UdpListenerVerticle extends AbstractVerticle {
 	public void start() {
 		logger.trace("Starting UDP Listener");
 
+		// configuration.setThrowExceptionOnMissing();
+		//  String getEncodedString(String key, ConfigurationDecoder decoder);
+//		Parameters params = new Parameters();
+//		FileBasedConfigurationBuilder<XMLConfiguration> builder =
+//		    new FileBasedConfigurationBuilder<XMLConfiguration>(XMLConfiguration.class)
+//		    .configure(params.xml()
+//		        .setFileName("myconfig.xml")
+//		        .setValidating(true));
+		
 		// TODO should be stored in a configuration repository somewhere
 		String addr = "0.0.0.0";
 		int port = 5353;
@@ -50,7 +59,7 @@ public class UdpListenerVerticle extends AbstractVerticle {
 								}
 							});
 						} else {
-							logger.error("error", busSendResult.cause());
+							logger.error("Error while sending to Vertx bus and/or handling the message", busSendResult.cause());
 						}
 					});
 				});
