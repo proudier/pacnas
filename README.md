@@ -21,7 +21,7 @@ Thanks goes to:
 Using Maven:
 
 ```
-mvn clean package -Dmaven.test.skip=true
+mvn clean package
 ```
 
 ## How to Run 
@@ -29,5 +29,5 @@ mvn clean package -Dmaven.test.skip=true
 Once built:
 
 ```
-mvn vertx:runMod -Dmaven.test.skip=true
+java -jar pacnas-$VERSION-fat.jar
 ```
