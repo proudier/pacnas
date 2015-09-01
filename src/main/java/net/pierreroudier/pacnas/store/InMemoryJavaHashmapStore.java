@@ -1,16 +1,16 @@
 package net.pierreroudier.pacnas.store;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import org.xbill.DNS.Record;
 import org.xbill.DNS.Type;
 
 /**
  * Store in a Java Collection inside JVM heap space
  */
+
 public class InMemoryJavaHashmapStore implements Store {
 	private Map<String, StoreEntry> entries;
 
@@ -19,12 +19,35 @@ public class InMemoryJavaHashmapStore implements Store {
 	}
 
 	@Override
-	public Record[] getRecords(String queryName, int queryType) {
+	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<List<Record>>> handler) {
 		StoreEntry storeEntry = entries.get(composeKey(queryName, queryType));
-		if (storeEntry != null)
-			return storeEntry.records;
-		else
-			return null;
+		handler.handle(new AsyncResult<List<Record>>() {
+			@Override
+			public List<Record> result() {
+				if (storeEntry != null) {
+					return Arrays.asList(storeEntry.records);
+				} else {
+					return null;
+				}
+			}
+
+			@Override
+			public Throwable cause() {
+				return null;
+			}
+
+			@Override
+			public boolean succeeded() {
+				return true;
+			}
+
+			@Override
+			public boolean failed() {
+				return false;
+			}
+		});
+
+		return this;
 	}
 
 	@Override

@@ -1,5 +1,7 @@
 package net.pierreroudier.pacnas.store;
 
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import io.vertx.core.Vertx;
 
 import java.util.ArrayList;
@@ -20,14 +22,13 @@ public class RedisStore implements Store {
 	}
 
 	@Override
-	public Record[] getRecords(String queryName, int queryType) {
+	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<List<Record>>> handler) {
 		switch (queryType) {
-		case Type.A:
-		return storeA.getRecords(queryName);
-
-		default:
-			return null;
+			case Type.A:
+				storeA.getRecords(queryName, handler);
+				break;
 		}
+		return this;
 	}
 
 	@Override
@@ -35,16 +36,17 @@ public class RedisStore implements Store {
 		switch (queryType) {
 		case Type.A:
 			// TODO check that all records have the same queryName, queryType and TTL
+			long  ttl = records[0].getTTL();
 			List<String> ipAddresses = new ArrayList<String>();
 			for (Record record : records) {
 				ARecord ar = (ARecord) record;
 				ipAddresses.add(ar.getAddress().getHostAddress());
 			}
-			storeA.putRecords(queryName, records[0].getTTL(), ipAddresses);
+			storeA.putRecords(queryName, ttl, ipAddresses);
 			break;
 
 		default:
-			logger.info("Not adding to RedisStore {} {}", queryName, Type.string(queryType));
+			logger.info("Not adding to RedisStore type {} for '{}'", Type.string(queryType), queryName);
 			return;
 		}
 
@@ -52,7 +54,7 @@ public class RedisStore implements Store {
 
 	@Override
 	public void discardContent() {
-		// TODO Auto-generated method stub
+		storeA.discardContent();
 
 	}
 

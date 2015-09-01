@@ -2,6 +2,8 @@ package net.pierreroudier.pacnas.store;
 
 import java.util.List;
 
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
 import org.xbill.DNS.Record;
 
 public interface Store {
@@ -10,9 +12,9 @@ public interface Store {
 	 * 
 	 * @param queryName
 	 * @param queryType
-	 * @return Null if no matching records are found in the store
+	 * @param handler if succeeded and result==null means they are no such entries in the store
 	 */
-	public Record[] getRecords(String queryName, int queryType);
+	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<List<Record>>> handler);
 	
 	/**
 	 * 
