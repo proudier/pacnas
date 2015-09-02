@@ -9,17 +9,13 @@ import org.xbill.DNS.Record;
 
 /**
  * A Store specialized for A resource-record
- * 
- *
  */
 public interface StoreForRecordA {
 
 	/**
-	 * 
-	 * @param queryName
-	 * @return Null if no matching records are found in the store
+	 * @see Store#getRecords(String, int, Handler)
 	 */
-	public StoreForRecordA getRecords(String queryName,  Handler<AsyncResult<List<Record>>> handler);
+	public StoreForRecordA getRecords(String queryName,  Handler<AsyncResult<Record[]>> handler);
 
 	/**
 	 * 

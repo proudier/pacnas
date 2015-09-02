@@ -3,6 +3,7 @@ package net.pierreroudier.pacnas.store;
 import java.util.*;
 
 import io.vertx.core.AsyncResult;
+import io.vertx.core.Future;
 import io.vertx.core.Handler;
 import org.xbill.DNS.Record;
 import org.xbill.DNS.Type;
@@ -19,33 +20,12 @@ public class InMemoryJavaHashmapStore implements Store {
 	}
 
 	@Override
-	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<List<Record>>> handler) {
+	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<Record[]>> handler) {
 		StoreEntry storeEntry = entries.get(composeKey(queryName, queryType));
-		handler.handle(new AsyncResult<List<Record>>() {
-			@Override
-			public List<Record> result() {
-				if (storeEntry != null) {
-					return Arrays.asList(storeEntry.records);
-				} else {
-					return null;
-				}
-			}
-
-			@Override
-			public Throwable cause() {
-				return null;
-			}
-
-			@Override
-			public boolean succeeded() {
-				return true;
-			}
-
-			@Override
-			public boolean failed() {
-				return false;
-			}
-		});
+		if(storeEntry != null)
+			handler.handle(Future.succeededFuture(storeEntry.records));
+		else
+			handler.handle(Future.succeededFuture());
 
 		return this;
 	}

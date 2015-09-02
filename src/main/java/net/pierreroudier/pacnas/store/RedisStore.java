@@ -22,7 +22,7 @@ public class RedisStore implements Store {
 	}
 
 	@Override
-	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<List<Record>>> handler) {
+	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<Record[]>> handler) {
 		switch (queryType) {
 			case Type.A:
 				storeA.getRecords(queryName, handler);
@@ -55,7 +55,6 @@ public class RedisStore implements Store {
 	@Override
 	public void discardContent() {
 		storeA.discardContent();
-
 	}
 
 	@Override

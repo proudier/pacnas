@@ -1,6 +1,7 @@
 package net.pierreroudier.pacnas;
 
 import java.net.InetAddress;
+import java.util.Arrays;
 import java.util.List;
 
 import net.pierreroudier.pacnas.store.InMemoryJavaHashmapStore;
@@ -34,18 +35,18 @@ public class StoreTest {
 
 		store.getRecords(queryNameAsString, queryType, result -> {
 			Assert.assertTrue(result.succeeded());
-			List<Record> recordsFromStore = result.result();
+			Record[] recordsFromStore = result.result();
 			Assert.assertNotNull(recordsFromStore, "The store return records");
-			Assert.assertEquals(recordsFromStore.size(), 1);
-			Assert.assertEquals(recordsFromStore.get(0).getName(), queryNameAsDnsjavaName);
-			Assert.assertEquals(recordsFromStore.get(0).getType(), queryType);
-			Assert.assertEquals(recordsFromStore.get(0).getDClass(), queryClass);
-			Assert.assertEquals(recordsFromStore.get(0).getTTL(), ttl);
-			Assert.assertEquals(recordsFromStore.get(0).rdataToString(), ipAddress.getHostAddress());
+			Assert.assertEquals(recordsFromStore.length, 1);
+			Assert.assertEquals(recordsFromStore[0].getName(), queryNameAsDnsjavaName);
+			Assert.assertEquals(recordsFromStore[0].getType(), queryType);
+			Assert.assertEquals(recordsFromStore[0].getDClass(), queryClass);
+			Assert.assertEquals(recordsFromStore[0].getTTL(), ttl);
+			Assert.assertEquals(recordsFromStore[0].rdataToString(), ipAddress.getHostAddress());
 		});
 	}
 
-	@Test(description = "Test the discard fonction empty the store properly", timeOut = 1000)
+	@Test(description = "Test the discard function empty the store properly", timeOut = 1000)
 	public void testStoreDiscard() throws Exception {
 		String queryNameAsString = "google.fr.";
 		int queryType = Type.A;
@@ -63,7 +64,7 @@ public class StoreTest {
 		store.discardContent();
 
 		store.getRecords(queryNameAsString, queryType, result -> {
-			Assert.assertTrue(result.succeeded());
+			Assert.assertTrue(result.succeeded(), "Future should succeed");
 			Assert.assertNull(result.result(),"The store not return records because it should be empty");
 		});
 

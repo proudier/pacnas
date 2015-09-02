@@ -31,7 +31,7 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 	}
 
 	@Override
-	public StoreForRecordA getRecords(String queryName, Handler<AsyncResult<List<Record>>> handler) {
+	public StoreForRecordA getRecords(String queryName, Handler<AsyncResult<Record[]>> handler) {
 		redis.get(keyForTtl(queryName), resTtl -> {
 			if (resTtl.failed() || resTtl.result() == null) {
 				logger.trace("No TTL retrieved from RedisStore", resTtl.cause());
@@ -42,20 +42,22 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 						logger.trace("No Addresses retrieved from RedisStore", resAddr.cause());
 						handler.handle(Future.failedFuture(resAddr.cause()));
 					} else {
-						List<Record> records = null;
+						Record[] result = null;
 						try {
 							long ttl = Long.parseLong(resTtl.result());
 
-							JsonArray jsonArray = (JsonArray) resAddr.result();
-							if(jsonArray.size() == 0) {
+							List<String> addresses = resAddr.result().getList();
+							if(addresses.size() == 0) {
 								handler.handle(Future.succeededFuture());
-							}
-							List<String> addresses = jsonArray.getList();
-							records = new ArrayList<Record>(addresses.size());
-							Name name = new Name(queryName);
-							for (String address : addresses) {
-								records.add(new ARecord(name, DClass.IN, ttl, InetAddress.getByName(address)));
-								logger.trace("Built ARecord from cache");
+							} else {
+								Name name = new Name(queryName);
+								result = new Record[addresses.size()];
+
+								for(int i=0; i<addresses.size(); i++) {
+									String address = addresses.get(i);
+									result[i] = new ARecord(name, DClass.IN, ttl, InetAddress.getByName(address));
+									logger.trace("Built ARecord from cache");
+								}
 							}
 						} catch (NumberFormatException e) {
 							logger.trace("TTL data from RedisStore is invalid", e);
@@ -65,7 +67,7 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 							handler.handle(Future.failedFuture(e));
 						}
 
-						handler.handle(Future.succeededFuture(records));
+						handler.handle(Future.succeededFuture(result));
 					}
 				});
 			}

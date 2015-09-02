@@ -78,11 +78,10 @@ public class ResolutionVerticle extends AbstractVerticle {
 		}
 
 		store.getRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(), resCache -> {
-			if(resCache.succeeded() && resCache.result().size() > 0) {
+			if(resCache.succeeded() && resCache.result() != null && resCache.result().length > 0) {
 				logger.trace("Answering from cache");
 
-				Record[] foo = new Record[0];
-				s.answerRS = resCache.result().toArray(foo);
+				s.answerRS = resCache.result();
 				statsManager.increaseQueryAnsweredFromCache();
 				generateResponse(s, Rcode.NOERROR);
 				possiblyConclude(s);
