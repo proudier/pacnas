@@ -9,9 +9,7 @@ import io.vertx.core.json.JsonObject;
 import io.vertx.redis.RedisClient;
 
 import java.net.InetAddress;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Vector;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -32,45 +30,14 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 
 	@Override
 	public StoreForRecordA getRecords(String queryName, Handler<AsyncResult<Record[]>> handler) {
+		final GetQueryRoutine getQueryRoutine = new GetQueryRoutine();
 		redis.get(keyForTtl(queryName), resTtl -> {
-			if (resTtl.failed() || resTtl.result() == null) {
-				logger.trace("No TTL retrieved from RedisStore", resTtl.cause());
-				handler.handle(Future.failedFuture(resTtl.cause()));
-			} else {
-				redis.smembers(keyForAddresses(queryName), resAddr -> {
-					if (resAddr.failed() || resTtl.result() == null) {
-						logger.trace("No Addresses retrieved from RedisStore", resAddr.cause());
-						handler.handle(Future.failedFuture(resAddr.cause()));
-					} else {
-						Record[] result = null;
-						try {
-							long ttl = Long.parseLong(resTtl.result());
-
-							List<String> addresses = resAddr.result().getList();
-							if(addresses.size() == 0) {
-								handler.handle(Future.succeededFuture());
-							} else {
-								Name name = new Name(queryName);
-								result = new Record[addresses.size()];
-
-								for(int i=0; i<addresses.size(); i++) {
-									String address = addresses.get(i);
-									result[i] = new ARecord(name, DClass.IN, ttl, InetAddress.getByName(address));
-									logger.trace("Built ARecord from cache");
-								}
-							}
-						} catch (NumberFormatException e) {
-							logger.trace("TTL data from RedisStore is invalid", e);
-							handler.handle(Future.failedFuture(e));
-						}  catch (Exception e) {
-							logger.error("Addresses data from RedisStore is invalid", e);
-							handler.handle(Future.failedFuture(e));
-						}
-
-						handler.handle(Future.succeededFuture(result));
-					}
-				});
-			}
+			getQueryRoutine.resultTtlQuery = resTtl;
+			getQueryRoutine.foo(queryName, handler);
+		});
+		redis.smembers(keyForAddresses(queryName), resAddr -> {
+			getQueryRoutine.resultAddrQuery = resAddr;
+			getQueryRoutine.foo(queryName, handler);
 		});
 		return this;
 	}
@@ -130,5 +97,65 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 
 	protected String keyForAddresses(String queryName) {
 		return "a_" + queryName;
+	}
+
+	/**
+	 * Not thread safe
+	 */
+	private class GetQueryRoutine {
+		AsyncResult<String> resultTtlQuery;
+		AsyncResult<JsonArray> resultAddrQuery;
+
+		public void foo(String queryName, Handler<AsyncResult<Record[]>> handler) {
+			// Fail-fast on error conditions
+			if(resultTtlQuery != null) {
+				if(resultTtlQuery.succeeded()) {
+					if(resultTtlQuery.result() == null) {
+						logger.trace("No TTL found in RedisStore for given queryName");
+						handler.handle(Future.succeededFuture());
+					}
+				} else {
+					logger.trace("Failed retrieving TTL from RedisStore", resultTtlQuery.cause());
+					handler.handle(Future.failedFuture(resultTtlQuery.cause()));
+				}
+			}
+			if(resultAddrQuery != null) {
+				if(resultAddrQuery.succeeded()) {
+					if(resultAddrQuery.result() == null || resultAddrQuery.result().size()==0) {
+						logger.trace("No Address found in RedisStore for given queryName");
+						handler.handle(Future.succeededFuture());
+					}
+				} else {
+					logger.trace("Failed retrieving Address from RedisStore", resultAddrQuery.cause());
+					handler.handle(Future.failedFuture(resultAddrQuery.cause()));
+				}
+			}
+
+			if(resultTtlQuery != null && resultAddrQuery != null) {
+				Record[] result = null;
+				try {
+					long ttl = Long.parseLong(resultTtlQuery.result());
+					JsonArray jsonArray = resultAddrQuery.result();
+					Name name = new Name(queryName);
+					result = new Record[jsonArray.size()];
+					for(int i=0; i<jsonArray.size(); i++) {
+						String address = jsonArray.getString(i);
+						result[i] = new ARecord(name, DClass.IN, ttl, InetAddress.getByName(address));
+						logger.trace("Built ARecord from cache");
+					}
+				} catch (NumberFormatException e) {
+					logger.trace("TTL data from RedisStore is invalid", e);
+					handler.handle(Future.failedFuture(e));
+				}  catch (Exception e) {
+					logger.error("Addresses data from RedisStore is invalid", e);
+					handler.handle(Future.failedFuture(e));
+				}
+
+				handler.handle(Future.succeededFuture(result));
+			}
+		}
+
+
+
 	}
 }
