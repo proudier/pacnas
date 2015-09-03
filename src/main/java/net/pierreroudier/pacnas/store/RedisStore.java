@@ -37,7 +37,7 @@ public class RedisStore implements Store {
 		case Type.A:
 			// TODO check that all records have the same queryName, queryType and TTL
 			long  ttl = records[0].getTTL();
-			List<String> ipAddresses = new ArrayList<String>();
+			List<String> ipAddresses = new ArrayList<>();
 			for (Record record : records) {
 				ARecord ar = (ARecord) record;
 				ipAddresses.add(ar.getAddress().getHostAddress());

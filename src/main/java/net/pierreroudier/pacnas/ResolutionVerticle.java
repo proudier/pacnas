@@ -323,11 +323,13 @@ public class ResolutionVerticle extends AbstractVerticle {
 
 	private void possiblyConclude(final ProcessingContext s) {
 		if (s.responseReady) {
-			logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-			s.vertxBusMessage.reply(s.response);
+			if(logger.isTraceEnabled()) {
+				logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+			}
 			if (s.recursionCtx != null && s.recursionCtx.socket != null) {
 				s.recursionCtx.socket.close();
 			}
+			s.vertxBusMessage.reply(s.response);
 		}
 	}
 

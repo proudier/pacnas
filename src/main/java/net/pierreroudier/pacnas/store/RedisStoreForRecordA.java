@@ -44,6 +44,8 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 
 	@Override
 	public void putRecords(String queryName, long ttl, List<String> ipAddresses) {
+		logger.trace("Putting record into RedisStore");
+
 		redis.multi(res -> {
 			if (res.failed()) {
 				logger.error("Starting transaction failed", res.cause());
@@ -103,31 +105,43 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 	 * Not thread safe
 	 */
 	private class GetQueryRoutine {
+		boolean alreadyDone = false;
 		AsyncResult<String> resultTtlQuery;
 		AsyncResult<JsonArray> resultAddrQuery;
 
 		public void foo(String queryName, Handler<AsyncResult<Record[]>> handler) {
+			//if(alreadyDone)
+				//return;
+
 			// Fail-fast on error conditions
 			if(resultTtlQuery != null) {
 				if(resultTtlQuery.succeeded()) {
 					if(resultTtlQuery.result() == null) {
 						logger.trace("No TTL found in RedisStore for given queryName");
+						alreadyDone = true;
 						handler.handle(Future.succeededFuture());
+						return;
 					}
 				} else {
 					logger.trace("Failed retrieving TTL from RedisStore", resultTtlQuery.cause());
+					alreadyDone = true;
 					handler.handle(Future.failedFuture(resultTtlQuery.cause()));
+					return;
 				}
 			}
 			if(resultAddrQuery != null) {
 				if(resultAddrQuery.succeeded()) {
 					if(resultAddrQuery.result() == null || resultAddrQuery.result().size()==0) {
 						logger.trace("No Address found in RedisStore for given queryName");
+						alreadyDone = true;
 						handler.handle(Future.succeededFuture());
+						return;
 					}
 				} else {
 					logger.trace("Failed retrieving Address from RedisStore", resultAddrQuery.cause());
+					alreadyDone = true;
 					handler.handle(Future.failedFuture(resultAddrQuery.cause()));
+					return;
 				}
 			}
 
@@ -146,12 +160,16 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 				} catch (NumberFormatException e) {
 					logger.trace("TTL data from RedisStore is invalid", e);
 					handler.handle(Future.failedFuture(e));
+					return;
 				}  catch (Exception e) {
 					logger.error("Addresses data from RedisStore is invalid", e);
 					handler.handle(Future.failedFuture(e));
+					return;
 				}
 
+				alreadyDone = true;
 				handler.handle(Future.succeededFuture(result));
+				return;
 			}
 		}
 
