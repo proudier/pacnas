@@ -63,7 +63,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 
 	private void onIncomingDataPacket(final io.vertx.core.eventbus.Message<Object> vertxBusMessage) {
 		if(logger.isTraceEnabled())
-			logger.trace("Resolution request received via Vertx bus (msg hash={})", vertxBusMessage.hashCode());
+			logger.trace("[{}] Resolution request received via Vertx bus", vertxBusMessage.hashCode());
 
 		statsManager.increaseQueryReceived();
 
@@ -72,21 +72,25 @@ public class ResolutionVerticle extends AbstractVerticle {
 			unmarshalBusMessage(vertxBusMessage, s);
 			incomingRequestBasicCheck(s);
 		} catch (IncomingRequestException e) {
-			logger.trace(e.getMessage());
+			logger.trace("["+vertxBusMessage.hashCode()+"] Error dealing with incoming message", e);
 			generateResponse(s, e.getOutcomeReturnCode());
 			possiblyConclude(s);
+			return;
 		}
 
 		store.getRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(), resCache -> {
-			if(resCache.succeeded() && resCache.result() != null && resCache.result().length > 0) {
-				logger.trace("Answering from cache");
+			if (resCache.succeeded() && resCache.result() != null && resCache.result().length > 0) {
+				if(logger.isTraceEnabled())
+					logger.trace("[{}] Answering from cache", s.vertxBusMessage.hashCode());
 
 				s.answerRS = resCache.result();
 				statsManager.increaseQueryAnsweredFromCache();
 				generateResponse(s, Rcode.NOERROR);
 				possiblyConclude(s);
+				return;
 			} else {
-				logger.trace("Not found in cache, starting recursive resolution");
+				if(logger.isTraceEnabled())
+					logger.trace("[{}] Not found in cache, starting recursive resolution", s.vertxBusMessage.hashCode());
 
 				try {
 					prepareRecursion(s);
@@ -324,7 +328,7 @@ public class ResolutionVerticle extends AbstractVerticle {
 	private void possiblyConclude(final ProcessingContext s) {
 		if (s.responseReady) {
 			if(logger.isTraceEnabled()) {
-				logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
+				logger.trace("[{}] Replying to message onto Vertx bus", s.vertxBusMessage.hashCode());
 			}
 			if (s.recursionCtx != null && s.recursionCtx.socket != null) {
 				s.recursionCtx.socket.close();

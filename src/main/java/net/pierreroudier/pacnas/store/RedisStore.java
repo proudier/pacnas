@@ -15,10 +15,10 @@ import org.xbill.DNS.Type;
 
 public class RedisStore implements Store {
 	private final Logger logger = LoggerFactory.getLogger(RedisStore.class);
-	private StoreForRecordA storeA;
+	private StoreForRecord storeA;
 
 	public RedisStore(Vertx vertx) {
-		storeA = new RedisStoreForRecordA(vertx);
+		storeA = new RedisStoreForRecord(vertx);
 	}
 
 	@Override

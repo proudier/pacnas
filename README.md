@@ -31,3 +31,7 @@ Once built:
 ```
 mvn vertx:runMod -Dmaven.test.skip=true
 ```
+
+## Useful commands
+
+dig @localhost -p5353 free.Fr +tries=1

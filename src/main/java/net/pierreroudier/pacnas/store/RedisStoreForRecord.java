@@ -13,23 +13,20 @@ import java.util.List;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.xbill.DNS.ARecord;
-import org.xbill.DNS.DClass;
-import org.xbill.DNS.Name;
-import org.xbill.DNS.Record;
+import org.xbill.DNS.*;
 
-public class RedisStoreForRecordA implements StoreForRecordA {
-	private final Logger logger = LoggerFactory.getLogger(RedisStoreForRecordA.class);
+public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
+	private final Logger logger = LoggerFactory.getLogger(RedisStoreForRecord.class);
 	private RedisClient redis;
 
-	public RedisStoreForRecordA(Vertx vertx) {
+	public RedisStoreForRecord(Vertx vertx) {
 		JsonObject config = new JsonObject().put("host", "127.0.0.1").put("port", 6379);
 
 		redis = RedisClient.create(vertx, config);
 	}
 
 	@Override
-	public StoreForRecordA getRecords(String queryName, Handler<AsyncResult<Record[]>> handler) {
+	public StoreForRecord getRecords(String queryName, Handler<AsyncResult<Record[]>> handler) {
 		final GetQueryRoutine getQueryRoutine = new GetQueryRoutine();
 		redis.get(keyForTtl(queryName), resTtl -> {
 			getQueryRoutine.resultTtlQuery = resTtl;
@@ -109,7 +106,7 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 		AsyncResult<String> resultTtlQuery;
 		AsyncResult<JsonArray> resultAddrQuery;
 
-		public void foo(String queryName, Handler<AsyncResult<Record[]>> handler) {
+		public void foo(final String queryName, final Handler<AsyncResult<Record[]>> handler) {
 			//if(alreadyDone)
 				//return;
 
@@ -117,7 +114,7 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 			if(resultTtlQuery != null) {
 				if(resultTtlQuery.succeeded()) {
 					if(resultTtlQuery.result() == null) {
-						logger.trace("No TTL found in RedisStore for given queryName");
+						logger.trace("No TTL found in RedisStore for given queryName '{}'", queryName);
 						alreadyDone = true;
 						handler.handle(Future.succeededFuture());
 						return;
@@ -132,7 +129,7 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 			if(resultAddrQuery != null) {
 				if(resultAddrQuery.succeeded()) {
 					if(resultAddrQuery.result() == null || resultAddrQuery.result().size()==0) {
-						logger.trace("No Address found in RedisStore for given queryName");
+						logger.trace("No Address found in RedisStore for given queryName '{}'", queryName);
 						alreadyDone = true;
 						handler.handle(Future.succeededFuture());
 						return;
@@ -155,6 +152,7 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 					for(int i=0; i<jsonArray.size(); i++) {
 						String address = jsonArray.getString(i);
 						result[i] = new ARecord(name, DClass.IN, ttl, InetAddress.getByName(address));
+						//result[i] = Record.fromString(name, Type.A, DClass.IN, ttl, address, null);
 						logger.trace("Built ARecord from cache");
 					}
 				} catch (NumberFormatException e) {

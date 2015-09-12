@@ -4,18 +4,17 @@ import java.util.List;
 
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Handler;
-import org.xbill.DNS.ARecord;
 import org.xbill.DNS.Record;
 
 /**
  * A Store specialized for A resource-record
  */
-public interface StoreForRecordA {
+public interface StoreForRecord {
 
 	/**
 	 * @see Store#getRecords(String, int, Handler)
 	 */
-	public StoreForRecordA getRecords(String queryName,  Handler<AsyncResult<Record[]>> handler);
+	public StoreForRecord getRecords(String queryName,  Handler<AsyncResult<Record[]>> handler);
 
 	/**
 	 * 
