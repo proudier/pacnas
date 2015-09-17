@@ -2,21 +2,19 @@ package net.pierreroudier.pacnas.store;
 
 import java.util.List;
 
-import org.xbill.DNS.ARecord;
+import io.vertx.core.AsyncResult;
+import io.vertx.core.Handler;
+import org.xbill.DNS.Record;
 
 /**
  * A Store specialized for A resource-record
- * 
- *
  */
-public interface StoreForRecordA {
+public interface StoreForRecord {
 
 	/**
-	 * 
-	 * @param queryName
-	 * @return Null if no matching records are found in the store
+	 * @see Store#getRecords(String, int, Handler)
 	 */
-	public ARecord[] getRecords(String queryName);
+	public StoreForRecord getRecords(String queryName,  Handler<AsyncResult<Record[]>> handler);
 
 	/**
 	 * 

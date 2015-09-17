@@ -62,36 +62,54 @@ public class ResolutionVerticle extends AbstractVerticle {
 	}
 
 	private void onIncomingDataPacket(final io.vertx.core.eventbus.Message<Object> vertxBusMessage) {
-		logger.trace("Resolution request received via Vertx bus (msg hash={})", vertxBusMessage.hashCode());
+		if(logger.isTraceEnabled())
+			logger.trace("[{}] Resolution request received via Vertx bus", vertxBusMessage.hashCode());
+
 		statsManager.increaseQueryReceived();
 
 		final ProcessingContext s = new ProcessingContext();
-
 		try {
 			unmarshalBusMessage(vertxBusMessage, s);
 			incomingRequestBasicCheck(s);
+		} catch (IncomingRequestException e) {
+			logger.trace("["+vertxBusMessage.hashCode()+"] Error dealing with incoming message", e);
+			generateResponse(s, e.getOutcomeReturnCode());
+			possiblyConclude(s);
+			return;
+		}
 
-			// Lookup in cache
-			s.answerRS = store.getRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType());
-			if (s.answerRS != null) {
-				// From cache
-				logger.trace("Answering from cache");
+		store.getRecords(s.incomingQueryRecord.getName().toString(), s.incomingQueryRecord.getType(), resCache -> {
+			if (resCache.succeeded() && resCache.result() != null && resCache.result().length > 0) {
+				if(logger.isTraceEnabled())
+					logger.trace("[{}] Answering from cache", s.vertxBusMessage.hashCode());
+
+				s.answerRS = resCache.result();
 				statsManager.increaseQueryAnsweredFromCache();
 				generateResponse(s, Rcode.NOERROR);
+				possiblyConclude(s);
+				return;
 			} else {
-				// Not from cache
-				logger.trace("Not found in cache, starting recursive resolution");
-				prepareRecursion(s);
-				sendToRemoteServer(s);
+				if(logger.isTraceEnabled())
+					logger.trace("[{}] Not found in cache, starting recursive resolution", s.vertxBusMessage.hashCode());
+
+				try {
+					prepareRecursion(s);
+					sendToRemoteServer(s);
+				} catch (Exception e) {
+					logger.error("Oups", e);
+					generateResponse(s, Rcode.SERVFAIL);
+					possiblyConclude(s);
+				}
+
 				s.recursionCtx.socket.handler(dataPacket -> {
 					// ==ASYNC ======================================================================
 					// Response from remote server
-						try {
-							unmarshalRemoteServerResponse(dataPacket, s);
-							org.xbill.DNS.Message response = s.recursionCtx.remoteServerResponse;
-							remoteServerResponseCheck(s, response);
+					try {
+						unmarshalRemoteServerResponse(dataPacket, s);
+						org.xbill.DNS.Message response = s.recursionCtx.remoteServerResponse;
+						remoteServerResponseCheck(s, response);
 
-							switch (response.getRcode()) {
+						switch (response.getRcode()) {
 							case Rcode.NXDOMAIN:
 								s.answerRS = null;
 								generateResponse(s, Rcode.NXDOMAIN);
@@ -115,32 +133,22 @@ public class ResolutionVerticle extends AbstractVerticle {
 							default:
 								throw new Exception("Pacnas does not know what to do (yet) out of this return code: "
 										+ Rcode.string(response.getRcode()));
-							}
-						} catch (RemoteServerResponseException e) {
-							logger.trace(e.getMessage());
-							s.answerRS = null;
-							generateResponse(s, e.getOutcomeReturnCode());
-						} catch (Exception e) {
-							logger.error("Oups", e);
-							s.answerRS = null;
-							generateResponse(s, Rcode.SERVFAIL);
-						} finally {
-							possiblyConclude(s);
 						}
-						// ==ASYNC ======================================================================
-					});
+					} catch (RemoteServerResponseException e) {
+						logger.trace(e.getMessage());
+						s.answerRS = null;
+						generateResponse(s, e.getOutcomeReturnCode());
+					} catch (Exception e) {
+						logger.error("Oups", e);
+						s.answerRS = null;
+						generateResponse(s, Rcode.SERVFAIL);
+					} finally {
+						possiblyConclude(s);
+					}
+					// ==ASYNC ======================================================================
+				});
 			}
-		} catch (IncomingRequestException e) {
-			logger.trace(e.getMessage());
-			s.answerRS = null;
-			generateResponse(s, e.getOutcomeReturnCode());
-		} catch (Exception e) {
-			logger.error("Oups", e);
-			s.answerRS = null;
-			generateResponse(s, Rcode.SERVFAIL);
-		} finally {
-			possiblyConclude(s);
-		}
+		});
 	}
 
 	private void onNonAuthoritativeResponse(final ProcessingContext s, org.xbill.DNS.Message response) throws Exception {
@@ -238,12 +246,14 @@ public class ResolutionVerticle extends AbstractVerticle {
 	}
 
 	private void unmarshalBusMessage(final io.vertx.core.eventbus.Message<Object> vertxBusMessage, final ProcessingContext s)
-			throws IncomingRequestException, IOException {
+			throws IncomingRequestException {
 		s.vertxBusMessage = vertxBusMessage;
 		s.vertxBusMessageBody = (byte[]) vertxBusMessage.body();
 		try {
 			s.queryMessage = new org.xbill.DNS.Message(s.vertxBusMessageBody);
-		} catch (org.xbill.DNS.WireParseException e) {
+		} catch (IOException e) {
+			// It is crucial to catch org.xbill.DNS.WireParseException at this point, but it is a subclass of IOExcepion,
+			// so no need to handle it explicitly
 			throw new IncomingRequestException("Incoming request has format error", Rcode.FORMERR);
 		}
 
@@ -317,11 +327,13 @@ public class ResolutionVerticle extends AbstractVerticle {
 
 	private void possiblyConclude(final ProcessingContext s) {
 		if (s.responseReady) {
-			logger.trace("Replying to message with hash=" + s.vertxBusMessage.hashCode());
-			s.vertxBusMessage.reply(s.response);
+			if(logger.isTraceEnabled()) {
+				logger.trace("[{}] Replying to message onto Vertx bus", s.vertxBusMessage.hashCode());
+			}
 			if (s.recursionCtx != null && s.recursionCtx.socket != null) {
 				s.recursionCtx.socket.close();
 			}
+			s.vertxBusMessage.reply(s.response);
 		}
 	}
 
@@ -379,7 +391,8 @@ public class ResolutionVerticle extends AbstractVerticle {
 				sb.append(".");
 			}
 			String domainName = sb.toString();
-			Record[] records = store.getRecords(domainName, Type.NS);
+			// TODO Record[] records = store.getRecords(domainName, Type.NS);
+			Record[] records = null;
 			if (records != null) {
 				for (Record r : records) {
 					nameServerList.add(r.getName().toString());
@@ -391,7 +404,8 @@ public class ResolutionVerticle extends AbstractVerticle {
 		if (nameServerList.size() > 0) {
 			// Find IP of matching NS
 			for (String serverName : nameServerList) {
-				Record[] records = store.getRecords(serverName, Type.A);
+				// TODO Record[] records = store.getRecords(serverName, Type.A);
+				Record[] records = null;
 				for (Record r : records) {
 					// TODO do the real stuff
 					// s.recursionCtx.nameserversToUse.add(r.rdataToString());

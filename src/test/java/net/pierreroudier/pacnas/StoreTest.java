@@ -1,6 +1,8 @@
 package net.pierreroudier.pacnas;
 
 import java.net.InetAddress;
+import java.util.Arrays;
+import java.util.List;
 
 import net.pierreroudier.pacnas.store.InMemoryJavaHashmapStore;
 import net.pierreroudier.pacnas.store.Store;
@@ -31,17 +33,20 @@ public class StoreTest {
 		Store store = new InMemoryJavaHashmapStore();
 		store.putRecords(queryNameAsString, queryType, records);
 
-		Record[] recordsFromStore = store.getRecords(queryNameAsString, queryType);
-		Assert.assertNotNull(recordsFromStore, "The store return records");
-		Assert.assertEquals(recordsFromStore.length, 1);
-		Assert.assertEquals(recordsFromStore[0].getName(), queryNameAsDnsjavaName);
-		Assert.assertEquals(recordsFromStore[0].getType(), queryType);
-		Assert.assertEquals(recordsFromStore[0].getDClass(), queryClass);
-		Assert.assertEquals(recordsFromStore[0].getTTL(), ttl);
-		Assert.assertEquals(recordsFromStore[0].rdataToString(), ipAddress.getHostAddress());
+		store.getRecords(queryNameAsString, queryType, result -> {
+			Assert.assertTrue(result.succeeded());
+			Record[] recordsFromStore = result.result();
+			Assert.assertNotNull(recordsFromStore, "The store return records");
+			Assert.assertEquals(recordsFromStore.length, 1);
+			Assert.assertEquals(recordsFromStore[0].getName(), queryNameAsDnsjavaName);
+			Assert.assertEquals(recordsFromStore[0].getType(), queryType);
+			Assert.assertEquals(recordsFromStore[0].getDClass(), queryClass);
+			Assert.assertEquals(recordsFromStore[0].getTTL(), ttl);
+			Assert.assertEquals(recordsFromStore[0].rdataToString(), ipAddress.getHostAddress());
+		});
 	}
 
-	@Test(description = "Test the discard fonction empty the store properly", timeOut = 1000)
+	@Test(description = "Test the discard function empty the store properly", timeOut = 1000)
 	public void testStoreDiscard() throws Exception {
 		String queryNameAsString = "google.fr.";
 		int queryType = Type.A;
@@ -58,7 +63,10 @@ public class StoreTest {
 		store.putRecords(queryNameAsString, queryType, records);
 		store.discardContent();
 
-		Record[] recordsFromStore = store.getRecords(queryNameAsString, queryType);
-		Assert.assertNull(recordsFromStore, "The store not return records because it should be emtpy");
+		store.getRecords(queryNameAsString, queryType, result -> {
+			Assert.assertTrue(result.succeeded(), "Future should succeed");
+			Assert.assertNull(result.result(),"The store not return records because it should be empty");
+		});
+
 	}
 }
