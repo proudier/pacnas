@@ -19,7 +19,7 @@ public class RedisStoreForRecordA implements StoreForRecordA {
 	private RedisClient redis;
 
 	public RedisStoreForRecordA(Vertx vertx) {
-		JsonObject config = new JsonObject().put("host", "127.0.0.1").put("port", 63790);
+		JsonObject config = new JsonObject().put("host", "127.0.0.1").put("port", 6379);
 
 		redis = RedisClient.create(vertx, config);
 	}
