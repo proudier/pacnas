@@ -26,7 +26,15 @@ mvn clean package -Dmaven.test.skip=true
 
 ## How to Run 
 
-Once built:
+
+### From IDE
+
+Create a new launcher using as main class io.vertx.core.Starter
+In the tab "Program Arguments" type: "run your.package.ServerVerticle
+
+source: http://stackoverflow.com/questions/24277301/run-vertx-in-an-ide
+
+### From command line
 
 ```
 mvn vertx:runMod -Dmaven.test.skip=true
