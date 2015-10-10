@@ -31,3 +31,9 @@ Once built:
 ```
 java -jar pacnas-$VERSION-fat.jar
 ```
+
+## Dev notes
+
+### Code style guidelines
+
+We follow [Vertx guidelines](https://github.com/vert-x3/wiki/wiki/Vert.x-code-style-guidelines) because we like them!
