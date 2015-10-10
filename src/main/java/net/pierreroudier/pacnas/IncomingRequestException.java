@@ -6,20 +6,20 @@ package net.pierreroudier.pacnas;
  */
 public class IncomingRequestException extends Exception {
 
-	private static final long serialVersionUID = 1L;
-	private int outcomeReturnCode;
+  private static final long serialVersionUID = 1L;
+  private int outcomeReturnCode;
 
-	public IncomingRequestException(String message, int outcomeReturnCode) {
-		super(message);
-		this.outcomeReturnCode = outcomeReturnCode;
-	}
+  public IncomingRequestException(String message, int outcomeReturnCode) {
+    super(message);
+    this.outcomeReturnCode = outcomeReturnCode;
+  }
 
-	public int getOutcomeReturnCode() {
-		return outcomeReturnCode;
-	}
+  public int getOutcomeReturnCode() {
+    return outcomeReturnCode;
+  }
 
-	public void setOutcomeReturnCode(int outcomeReturnCode) {
-		this.outcomeReturnCode = outcomeReturnCode;
-	}
+  public void setOutcomeReturnCode(int outcomeReturnCode) {
+    this.outcomeReturnCode = outcomeReturnCode;
+  }
 
 }
