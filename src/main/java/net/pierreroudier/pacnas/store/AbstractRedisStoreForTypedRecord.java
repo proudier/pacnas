@@ -1,5 +1,12 @@
 package net.pierreroudier.pacnas.store;
 
+import java.util.List;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.xbill.DNS.Name;
+import org.xbill.DNS.Record;
+
 import io.vertx.core.AsyncResult;
 import io.vertx.core.Future;
 import io.vertx.core.Handler;
@@ -8,39 +15,29 @@ import io.vertx.core.json.JsonArray;
 import io.vertx.core.json.JsonObject;
 import io.vertx.redis.RedisClient;
 
-import java.net.InetAddress;
-import java.util.List;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.xbill.DNS.*;
-
-public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
-	private final Logger logger = LoggerFactory.getLogger(RedisStoreForRecord.class);
+public abstract class AbstractRedisStoreForTypedRecord {
+	private final Logger logger = LoggerFactory.getLogger(AbstractRedisStoreForTypedRecord.class);
 	private RedisClient redis;
 
-	public RedisStoreForRecord(Vertx vertx) {
+	public AbstractRedisStoreForTypedRecord(Vertx vertx) {
 		JsonObject config = new JsonObject().put("host", "127.0.0.1").put("port", 6379);
-
 		redis = RedisClient.create(vertx, config);
 	}
 
-	@Override
-	public StoreForRecord getRecords(String queryName, Handler<AsyncResult<Record[]>> handler) {
+	public AbstractRedisStoreForTypedRecord getRecords(String queryName, Handler<AsyncResult<Record[]>> handler) {
 		final GetQueryRoutine getQueryRoutine = new GetQueryRoutine();
 		redis.get(keyForTtl(queryName), resTtl -> {
 			getQueryRoutine.resultTtlQuery = resTtl;
 			getQueryRoutine.foo(queryName, handler);
 		});
-		redis.smembers(keyForAddresses(queryName), resAddr -> {
-			getQueryRoutine.resultAddrQuery = resAddr;
+		redis.smembers(keyForRecordData(queryName), resRdata -> {
+			getQueryRoutine.resultRdataQuery = resRdata;
 			getQueryRoutine.foo(queryName, handler);
 		});
 		return this;
 	}
 
-	@Override
-	public void putRecords(String queryName, long ttl, List<String> ipAddresses) {
+	public void putRecords(String queryName, long ttl, List<String> recordData) {
 		logger.trace("Putting record into RedisStore");
 
 		redis.multi(res -> {
@@ -58,9 +55,9 @@ public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
 			}
 		});
 		// IP Addresses
-		redis.saddMany(keyForAddresses(queryName), ipAddresses, res -> {
+		redis.saddMany(keyForRecordData(queryName), recordData, res -> {
 			if (res.failed()) {
-				logger.error("Saved to Redis failed (Addresses)", res.cause());
+				logger.error("Saved to Redis failed (RData)", res.cause());
 			} else {
 				logger.trace("IPs saved");
 			}
@@ -73,7 +70,6 @@ public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
 		});
 	}
 
-	@Override
 	public void discardContent() {
 		redis.flushall(result -> {
 			if (result.succeeded()) {
@@ -84,19 +80,15 @@ public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
 		});
 	}
 
-	@Override
 	public List<String> getContentDump() {
 		// TODO Auto-generated method stub
 		return null;
 	}
 
-	protected String keyForTtl(String queryName) {
-		return "t_" + queryName;
-	}
 
-	protected String keyForAddresses(String queryName) {
-		return "a_" + queryName;
-	}
+	protected abstract String keyForTtl(String queryName);
+	protected abstract String keyForRecordData(String queryName);
+	protected abstract Record makeRecord(long ttl, Name name, String rdata) throws Exception;
 
 	/**
 	 * Not thread safe
@@ -104,7 +96,7 @@ public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
 	private class GetQueryRoutine {
 		boolean alreadyDone = false;
 		AsyncResult<String> resultTtlQuery;
-		AsyncResult<JsonArray> resultAddrQuery;
+		AsyncResult<JsonArray> resultRdataQuery;
 
 		public void foo(final String queryName, final Handler<AsyncResult<Record[]>> handler) {
 			//if(alreadyDone)
@@ -126,33 +118,32 @@ public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
 					return;
 				}
 			}
-			if(resultAddrQuery != null) {
-				if(resultAddrQuery.succeeded()) {
-					if(resultAddrQuery.result() == null || resultAddrQuery.result().size()==0) {
-						logger.trace("No Address found in RedisStore for given queryName '{}'", queryName);
+			if(resultRdataQuery != null) {
+				if(resultRdataQuery.succeeded()) {
+					if(resultRdataQuery.result() == null || resultRdataQuery.result().size()==0) {
+						logger.trace("No Rdata found in RedisStore for given queryName '{}'", queryName);
 						alreadyDone = true;
 						handler.handle(Future.succeededFuture());
 						return;
 					}
 				} else {
-					logger.trace("Failed retrieving Address from RedisStore", resultAddrQuery.cause());
+					logger.trace("Failed retrieving Rdata from RedisStore", resultRdataQuery.cause());
 					alreadyDone = true;
-					handler.handle(Future.failedFuture(resultAddrQuery.cause()));
+					handler.handle(Future.failedFuture(resultRdataQuery.cause()));
 					return;
 				}
 			}
 
-			if(resultTtlQuery != null && resultAddrQuery != null) {
+			if(resultTtlQuery != null && resultRdataQuery != null) {
 				Record[] result = null;
 				try {
 					long ttl = Long.parseLong(resultTtlQuery.result());
-					JsonArray jsonArray = resultAddrQuery.result();
+					JsonArray jsonArray = resultRdataQuery.result();
 					Name name = new Name(queryName);
 					result = new Record[jsonArray.size()];
 					for(int i=0; i<jsonArray.size(); i++) {
 						String address = jsonArray.getString(i);
-						result[i] = new ARecord(name, DClass.IN, ttl, InetAddress.getByName(address));
-						//result[i] = Record.fromString(name, Type.A, DClass.IN, ttl, address, null);
+						result[i] = makeRecord(ttl, name, address);
 						logger.trace("Built ARecord from cache");
 					}
 				} catch (NumberFormatException e) {
@@ -160,7 +151,7 @@ public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
 					handler.handle(Future.failedFuture(e));
 					return;
 				}  catch (Exception e) {
-					logger.error("Addresses data from RedisStore is invalid", e);
+					logger.error("Rdata data from RedisStore is invalid", e);
 					handler.handle(Future.failedFuture(e));
 					return;
 				}
@@ -170,8 +161,5 @@ public class RedisStoreForRecord<T extends Record> implements StoreForRecord {
 				return;
 			}
 		}
-
-
-
 	}
 }
