@@ -26,13 +26,13 @@ public class RedisStore implements Store {
 	}
 
 	@Override
-	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<Record[]>> handler) {
-		switch (queryType) {
+	public Store getRecords(String name, int type, Handler<AsyncResult<Record[]>> handler) {
+		switch (type) {
 			case Type.A:
-				storeA.getRecords(queryName, handler);
+				storeA.getRecords(name, handler);
 				break;
 			case Type.NS:
-				storeNs.getRecords(queryName, handler);
+				storeNs.getRecords(name, handler);
 				break;
 		}
 		return this;

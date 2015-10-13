@@ -9,36 +9,27 @@ import org.xbill.DNS.Record;
 public interface Store {
 
 	/**
-	 * Look in the Store for Record matching the given queryName and queryType. If no such entries are found, the handler
+	 * Look in the Store for Records matching the given name and type. If no such entries are found, the handler
 	 * will be provided a null result.
-	 * @param queryName
-	 * @param queryType
-	 * @param handler if succeeded and result==null means they are no such entries in the store
 	 */
-	public Store getRecords(String queryName, int queryType, Handler<AsyncResult<Record[]>> handler);
+	public Store getRecords(String name, int type, Handler<AsyncResult<Record[]>> handler);
 	
 	/**
 	 * 
-	 * @param records Records should have the same Name, Type and TTL
+	 * @param records All Records in the given array must have the same Name, Type and TTL
 	 */
 	public Store putRecords(Record[] records, Handler<AsyncResult<String>> handler);
 	
 	/**
-	 * Drop all the records from the store; mainly for testing purposes
+	 * Drop all the records from the store.
 	 */
 	public Store discardContent(Handler<AsyncResult<String>> handler);
 	
 	/**
 	 * Return the number of element in the Store
-	 * @param handler
-	 * @return
 	 */
 	public Store countItems(Handler<AsyncResult<Long>> handler);
 	
-	/**
-	 * 
-	 * @return
-	 */
 	public List<String> getContentDump();
 	
 }
