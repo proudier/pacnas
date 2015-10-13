@@ -20,7 +20,7 @@
 		<main.verticle>net.pierreroudier.pacnas.BootstrapVerticle</main.verticle>
 
 		<!--Dependency versions -->
-		<vertx.version>3.0.0</vertx.version>
+		<vertx.version>3.1.0</vertx.version>
 		<vertx.testtools.version>2.0.3-final</vertx.testtools.version>
 		<junit.version>4.11</junit.version>
 		<slf4j.version>1.7.12</slf4j.version>
