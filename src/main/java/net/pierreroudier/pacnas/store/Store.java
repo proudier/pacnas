@@ -19,16 +19,21 @@ public interface Store {
 	
 	/**
 	 * 
-	 * @param queryName
-	 * @param queryType
-	 * @param records
+	 * @param records Records should have the same Name, Type and TTL
 	 */
-	public void putRecords(String queryName, int queryType, Record[] records);
+	public Store putRecords(Record[] records, Handler<AsyncResult<String>> handler);
 	
 	/**
 	 * Drop all the records from the store; mainly for testing purposes
 	 */
-	public void discardContent();
+	public Store discardContent(Handler<AsyncResult<String>> handler);
+	
+	/**
+	 * Return the number of element in the Store
+	 * @param handler
+	 * @return
+	 */
+	public Store countItems(Handler<AsyncResult<Long>> handler);
 	
 	/**
 	 * 

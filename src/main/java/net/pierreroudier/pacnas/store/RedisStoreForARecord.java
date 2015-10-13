@@ -11,22 +11,18 @@ import io.vertx.core.Vertx;
 
 public class RedisStoreForARecord extends AbstractRedisStoreForTypedRecord {
 
+	private static final String PREFIX = "a";
+
 	public RedisStoreForARecord(Vertx vertx) {
 		super(vertx);
 	}
-
-	@Override
-	protected String keyForTtl(String queryName) {
-		return "a-" + queryName;
-	}
-
-	@Override
-	protected String keyForRecordData(String queryName) {
-		return "a_" + queryName;
-	}
-
 	@Override
 	protected Record makeRecord(long ttl, Name name, String rdata) throws Exception {
 		return new ARecord(name, DClass.IN, ttl, InetAddress.getByName(rdata));
+	}
+	
+	@Override
+	protected String getPrefixForThisType() {
+		return PREFIX;
 	}
 }
